@@ -1,8 +1,8 @@
-const express = require('express');
-const userController = require('./../controllers/userController');
-const authController = require('./../controllers/authController');
+import express, { Router } from 'express';
+import userController from '../controllers/userController';
+import authController from '../controllers/authController';
 
-const router = express.Router();
+const router: Router = express.Router();
 
 router.post('/signup', authController.signup);
 router.post('/login', authController.login);
@@ -32,4 +32,4 @@ router
   .patch(userController.updateUser)
   .delete(userController.deleteUser);
 
-module.exports = router;
+export default router;

@@ -1,10 +1,12 @@
-const catchAsync = require('./../utils/catchAsync');
-const AppError = require('./../utils/appError');
-const APIFeatures = require('./../utils/apiFeatures');
+import { Request, Response, NextFunction } from 'express';
+import catchAsync from '../utils/catchAsync';
+import AppError from '../utils/appError';
+import APIFeatures from '../utils/apiFeatures';
+import { Model, Document } from 'mongoose';
 
-exports.deleteOne = Model =>
-  catchAsync(async (req, res, next) => {
-    const doc = await Model.findByIdAndDelete(req.params.id);
+export const deleteOne = (Model: Model<Document>) =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const doc = await Model.findByIdAndDelete(req.params['id']);
 
     if (!doc) {
       return next(new AppError('No document found with that ID', 404));
@@ -16,9 +18,9 @@ exports.deleteOne = Model =>
     });
   });
 
-exports.updateOne = Model =>
-  catchAsync(async (req, res, next) => {
-    const doc = await Model.findByIdAndUpdate(req.params.id, req.body, {
+export const updateOne = (Model: Model<Document>) =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const doc = await Model.findByIdAndUpdate(req.params['id'], req.body, {
       new: true,
       runValidators: true
     });
@@ -35,8 +37,8 @@ exports.updateOne = Model =>
     });
   });
 
-exports.createOne = Model =>
-  catchAsync(async (req, res, next) => {
+export const createOne = (Model: Model<Document>) =>
+  catchAsync(async (req: Request, res: Response, _next: NextFunction) => {
     const doc = await Model.create(req.body);
 
     res.status(201).json({
@@ -47,9 +49,9 @@ exports.createOne = Model =>
     });
   });
 
-exports.getOne = (Model, popOptions) =>
-  catchAsync(async (req, res, next) => {
-    let query = Model.findById(req.params.id);
+export const getOne = (Model: Model<Document>, popOptions?: string) =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    let query = Model.findById(req.params['id']);
     if (popOptions) query = query.populate(popOptions);
     const doc = await query;
 
@@ -65,10 +67,10 @@ exports.getOne = (Model, popOptions) =>
     });
   });
 
-exports.getAll = Model =>
-  catchAsync(async (req, res, next) => {
-    let filter = {};
-    if (req.params.id) filter = { tour: req.params.id };
+export const getAll = (Model: Model<Document>) =>
+  catchAsync(async (req: Request, res: Response, _next: NextFunction) => {
+    let filter: any = {};
+    if (req.params['id']) filter = { tour: req.params['id'] };
 
     const features = new APIFeatures(Model.find(filter), req.query)
       .filter()

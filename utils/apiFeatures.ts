@@ -1,5 +1,8 @@
 class APIFeatures {
-  constructor(query, queryString) {
+  query: any;
+  queryString: any;
+
+  constructor(query: any, queryString: any) {
     this.query = query;
     this.queryString = queryString;
   }
@@ -50,4 +53,4 @@ class APIFeatures {
     return this;
   }
 }
-module.exports = APIFeatures;
+export default APIFeatures;
