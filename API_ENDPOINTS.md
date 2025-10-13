@@ -83,7 +83,16 @@ curl -X DELETE http://localhost:3000/api/v1/users/deleteMe \
 
 ### 9. Get All Users (Admin Only)
 ```bash
+# Get all users
 curl -X GET http://localhost:3000/api/v1/users \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# Get only attendants
+curl -X GET "http://localhost:3000/api/v1/users?role=attendant" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# Get only admins
+curl -X GET "http://localhost:3000/api/v1/users?role=admin" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
@@ -190,6 +199,17 @@ curl -X GET http://localhost:3000/api/v1/bookings/status/pending \
 ```
 
 ## Query Parameters for Filtering
+
+### Get All Users with Filters
+```bash
+# Filter by role (attendant or admin)
+curl -X GET "http://localhost:3000/api/v1/users?role=attendant" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# Get all users (no filter)
+curl -X GET "http://localhost:3000/api/v1/users" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
 
 ### Get All Bookings with Filters
 ```bash

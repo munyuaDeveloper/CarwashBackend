@@ -27,8 +27,23 @@ const userController = {
     });
   }),
 
-  getAllUsers: catchAsync(async (_req: IRequestWithUser, res: Response, _next: NextFunction) => {
-    const users = await User.find();
+  getAllUsers: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
+    // Extract role filter from query parameters
+    const { role } = req.query;
+
+    // Build filter object
+    const filter: any = {};
+
+    // Add role filter if provided
+    if (role) {
+      // Validate role parameter
+      if (!['attendant', 'admin'].includes(role as string)) {
+        return next(new AppError('Role must be either "attendant" or "admin"', 400));
+      }
+      filter.role = role;
+    }
+
+    const users = await User.find(filter);
 
     res.status(200).json({
       status: 'success',
