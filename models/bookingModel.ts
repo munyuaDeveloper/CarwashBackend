@@ -4,9 +4,25 @@ import { IBooking } from '../types';
 const bookingSchema = new mongoose.Schema({
   carRegistrationNumber: {
     type: String,
-    required: [true, 'Car registration number is required'],
+    required: function (this: any): boolean {
+      return this.category === 'vehicle';
+    },
     trim: true,
     uppercase: true
+  },
+  phoneNumber: {
+    type: String,
+    // required: function (this: any): boolean {
+    //   return this.category === 'carpet';
+    // },
+    trim: true
+  },
+  color: {
+    type: String,
+    required: function (this: any): boolean {
+      return this.category === 'carpet';
+    },
+    trim: true
   },
   attendant: {
     type: mongoose.Schema.Types.ObjectId,
@@ -21,22 +37,35 @@ const bookingSchema = new mongoose.Schema({
   serviceType: {
     type: String,
     enum: ['full wash', 'half wash'],
-    required: [true, 'Service type is required']
+    required: function (this: any): boolean {
+      return this.category === 'vehicle';
+    }
   },
   vehicleType: {
     type: String,
-    required: [true, 'Vehicle type is required'],
+    required: function (this: any): boolean {
+      return this.category === 'vehicle';
+    },
     trim: true
+  },
+  category: {
+    type: String,
+    enum: ['vehicle', 'carpet'],
+    required: [true, 'Category is required']
   },
   paymentType: {
     type: String,
-    enum: ['cash', 'till number', 'attendant collected'],
+    enum: ['attendant_cash', 'admin_cash', 'admin_till'],
     required: [true, 'Payment type is required']
   },
   status: {
     type: String,
-    enum: ['pending', 'in progress', 'completed', 'cancelled'],
-    default: 'pending'
+    enum: ['in progress', 'completed'],
+    default: 'completed'
+  },
+  attendantPaid: {
+    type: Boolean,
+    default: false
   },
   createdAt: {
     type: Date,
@@ -52,6 +81,9 @@ const bookingSchema = new mongoose.Schema({
 
 // Index for better query performance
 bookingSchema.index({ carRegistrationNumber: 1 });
+bookingSchema.index({ phoneNumber: 1 });
+bookingSchema.index({ color: 1 });
+bookingSchema.index({ category: 1 });
 bookingSchema.index({ attendant: 1 });
 bookingSchema.index({ createdAt: -1 });
 

@@ -14,6 +14,7 @@ export interface IUser extends Document {
   passwordResetToken?: string;
   passwordResetExpires?: Date;
   active: boolean;
+  wallet?: string; // ObjectId reference to Wallet
   correctPassword(candidatePassword: string, userPassword: string): Promise<boolean>;
   changedPasswordAfter(JWTTimestamp: number): boolean;
   createPasswordResetToken(): string;
@@ -72,15 +73,69 @@ export type ControllerFunction = (
 // Booking related types
 export interface IBooking extends Document {
   _id: string;
-  carRegistrationNumber: string;
+  carRegistrationNumber?: string;
+  phoneNumber?: string;
+  color?: string;
   attendant: string; // ObjectId reference to User
   amount: number;
-  serviceType: 'full wash' | 'half wash';
-  vehicleType: string;
-  paymentType: 'cash' | 'till number' | 'attendant collected';
+  serviceType?: 'full wash' | 'half wash';
+  vehicleType?: string;
+  category: 'vehicle' | 'carpet';
+  paymentType: 'attendant_cash' | 'admin_cash' | 'admin_till';
   status: 'pending' | 'in progress' | 'completed' | 'cancelled';
+  attendantPaid: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// Wallet related types
+export interface IWallet extends Document {
+  _id: string;
+  attendant: string; // ObjectId reference to User
+  balance: number;
+  totalEarnings: number;
+  totalCommission: number;
+  totalCompanyShare: number;
+  companyDebt: number; // How much attendant owes company
+  lastPaymentDate: Date | null;
+  isPaid: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  resetWallet(): Promise<IWallet>;
+  calculateBalanceFromBookings(targetDate?: Date): Promise<IWallet>;
+}
+
+// Wallet model static methods
+export interface IWalletModel {
+  getOrCreateWallet(attendantId: string): Promise<IWallet>;
+  find(query?: any): any;
+  countDocuments(query?: any): Promise<number>;
+  aggregate(pipeline: any[]): Promise<any[]>;
+}
+
+
+// System wallet types
+export interface ISystemWallet extends Document {
+  _id: string;
+  totalRevenue: number;
+  totalCompanyShare: number;
+  totalAttendantPayments: number;
+  totalAdminCollections: number;
+  totalAttendantCollections: number;
+  currentBalance: number;
+  lastUpdated: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  creditSystemWallet(amount: number, source: string): Promise<ISystemWallet>;
+  trackCompanyShare(amount: number): Promise<ISystemWallet>;
+  reverseSystemWalletTransaction(amount: number, source: string): Promise<ISystemWallet>;
+}
+
+// System wallet model static methods
+export interface ISystemWalletModel {
+  getOrCreateSystemWallet(): Promise<ISystemWallet>;
+  find(query?: any): any;
+  aggregate(pipeline: any[]): Promise<any[]>;
 }
 
 // Environment variables

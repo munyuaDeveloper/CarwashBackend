@@ -33,7 +33,9 @@ const userSchema = new mongoose.Schema({
   },
   passwordConfirm: {
     type: String,
-    required: [true, 'Please confirm your password'],
+    required: function (this: IUser) {
+      return this.isNew || this.isModified('password');
+    },
     validate: {
       // This only works on CREATE and SAVE!!!
       validator: function (this: IUser, el: string): boolean {
@@ -49,6 +51,11 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
     select: false
+  },
+  wallet: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Wallet',
+    default: null
   }
 });
 
