@@ -30,9 +30,27 @@ const app: Application = express();
 app.use(helmet());
 
 // Implement CORS
-app.use(cors());
+const corsOptions = {
+  origin: process.env['NODE_ENV'] === 'production'
+    ? true // Allow all origins for React Native apps in production
+    : true, // Allow all origins in development
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Origin',
+    'X-Requested-With',
+    'Content-Type',
+    'Accept',
+    'Authorization',
+    'Cache-Control',
+    'Pragma'
+  ]
+};
 
-app.options('*', cors());
+app.use(cors(corsOptions));
+
+app.options('*', cors(corsOptions));
 
 // Development logging
 if (process.env['NODE_ENV'] === 'development') {
