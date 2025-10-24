@@ -38,7 +38,7 @@ const bookingController = {
       if (!['full wash', 'half wash'].includes(serviceType)) {
         return next(new AppError('Service type must be either "full wash" or "half wash"', 400));
       }
-    } 
+    }
     // else if (category === 'carpet') {
     //   if (!phoneNumber || !color) {
     //     return next(new AppError('For carpet bookings: phoneNumber and color are required', 400));
@@ -89,6 +89,8 @@ const bookingController = {
     // Update wallet balance when booking is created
     try {
       const wallet = await Wallet.getOrCreateWallet(attendant);
+      // Always set isPaid to false when a new booking is created
+      wallet.isPaid = false;
       await wallet['calculateBalanceFromBookings']();
     } catch (error) {
       console.error('Error updating wallet balance:', error);

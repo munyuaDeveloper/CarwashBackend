@@ -59,9 +59,16 @@ const walletSchema = new mongoose.Schema({
 walletSchema.index({ isPaid: 1 });
 walletSchema.index({ createdAt: -1 });
 
-// Pre-save middleware to update updatedAt
+// Pre-save middleware to update updatedAt and handle isPaid status
 walletSchema.pre('save', function (next) {
   this.updatedAt = new Date();
+
+  // If balance is not zero (positive or negative), set isPaid to false
+  // Only when balance is exactly 0 should isPaid be true (fully settled)
+  if (this.balance !== 0) {
+    this.isPaid = false;
+  }
+
   next();
 });
 
@@ -115,6 +122,12 @@ walletSchema.methods['calculateBalanceFromBookings'] = async function (targetDat
   this['totalCommission'] = totalCommission;
   this['totalCompanyShare'] = totalCompanyShare;
   this['companyDebt'] = companyDebt;
+
+  // Set isPaid to false if balance is not zero (positive or negative)
+  // Only when balance is exactly 0 should isPaid be true (fully settled)
+  if (balance !== 0) {
+    this['isPaid'] = false;
+  }
 
   return this['save']();
 };

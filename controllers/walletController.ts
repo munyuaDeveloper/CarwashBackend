@@ -164,6 +164,8 @@ const walletController = {
       // Calculate balance for all wallets for current date
       for (const wallet of wallets) {
         await wallet['calculateBalanceFromBookings']();
+        // Ensure the wallet is saved with updated isPaid status
+        await wallet.save();
       }
 
       res.status(200).json({
