@@ -75,8 +75,10 @@ export const getAll = (Model: Model<Document>) =>
     const features = new APIFeatures(Model.find(filter), req.query)
       .filter()
       .sort()
-      .limitFields()
-      .paginate();
+      .limitFields();
+
+    await features.paginate();
+
     // const doc = await features.query.explain();
     const doc = await features.query;
 
@@ -84,6 +86,7 @@ export const getAll = (Model: Model<Document>) =>
     res.status(200).json({
       status: 'success',
       results: doc.length,
+      total: features.totalCount || 0,
       data: {
         data: doc
       }

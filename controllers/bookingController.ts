@@ -117,14 +117,16 @@ const bookingController = {
     )
       .filter()
       .sort()
-      .limitFields()
-      .paginate();
+      .limitFields();
+
+    await features.paginate();
 
     const bookings = await features.query;
 
     res.status(200).json({
       status: 'success',
       results: bookings.length,
+      total: features.totalCount || 0,
       data: {
         bookings
       }

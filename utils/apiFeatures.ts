@@ -1,6 +1,7 @@
 class APIFeatures {
   query: any;
   queryString: any;
+  totalCount: number | null = null;
 
   constructor(query: any, queryString: any) {
     this.query = query;
@@ -43,11 +44,21 @@ class APIFeatures {
     return this;
   }
 
-  paginate() {
+  async paginate() {
     const page = this.queryString.page * 1 || 1;
     const limit = this.queryString.limit * 1 || 100;
     const skip = (page - 1) * limit;
 
+    // Calculate total count before applying pagination
+    // Get the model and query conditions to count documents
+    // Note: populate() doesn't affect count, so we only need the base query conditions
+    const model = this.query.model;
+    const queryConditions = this.query.getQuery();
+
+    // Count documents with the same filters (before pagination)
+    this.totalCount = await model.countDocuments(queryConditions);
+
+    // Apply pagination to the main query
     this.query = this.query.skip(skip).limit(limit);
 
     return this;
