@@ -5,6 +5,7 @@ import User from '../models/userModel';
 import Wallet from '../models/walletModel';
 import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
+import APIFeatures from '../utils/apiFeatures';
 
 const bookingController = {
   createBooking: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
@@ -108,10 +109,18 @@ const bookingController = {
     });
   }),
 
-  getAllBookings: catchAsync(async (_req: IRequestWithUser, res: Response, _next: NextFunction) => {
-    const bookings = await Booking.find()
-      .populate('attendant', 'name email role')
-      .sort({ createdAt: -1 });
+  getAllBookings: catchAsync(async (req: IRequestWithUser, res: Response, _next: NextFunction) => {
+    // Use APIFeatures for filtering, sorting, field limiting and pagination
+    const features = new APIFeatures(
+      Booking.find().populate('attendant', 'name email role'),
+      req.query
+    )
+      .filter()
+      .sort()
+      .limitFields()
+      .paginate();
+
+    const bookings = await features.query;
 
     res.status(200).json({
       status: 'success',
