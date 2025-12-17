@@ -18,7 +18,8 @@ const bookingController = {
       serviceType,
       vehicleType,
       category,
-      paymentType
+      paymentType,
+      note
     } = req.body;
 
     // Validate required fields
@@ -84,6 +85,11 @@ const bookingController = {
       bookingData.color = color.trim();
     }
 
+    // Add note if provided
+    if (note !== undefined) {
+      bookingData.note = note.trim();
+    }
+
     // Create new booking
     const newBooking = await Booking.create(bookingData);
 
@@ -110,11 +116,12 @@ const bookingController = {
   }),
 
   getAllBookings: catchAsync(async (req: IRequestWithUser, res: Response, _next: NextFunction) => {
-    // Use APIFeatures for filtering, sorting, field limiting and pagination
+    // Use APIFeatures for searching, filtering, sorting, field limiting and pagination
     const features = new APIFeatures(
       Booking.find().populate('attendant', 'name email role'),
       req.query
     )
+      .search()
       .filter()
       .sort()
       .limitFields();
@@ -160,7 +167,8 @@ const bookingController = {
       vehicleType,
       category,
       paymentType,
-      status
+      status,
+      note
     } = req.body;
 
     // Validate category if provided
@@ -242,7 +250,8 @@ const bookingController = {
         ...(vehicleType && { vehicleType: vehicleType.trim() }),
         ...(category && { category }),
         ...(paymentType && { paymentType }),
-        ...(status && { status })
+        ...(status && { status }),
+        ...(note !== undefined && { note: note ? note.trim() : null })
       },
       {
         new: true,

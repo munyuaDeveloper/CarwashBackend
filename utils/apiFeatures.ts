@@ -2,22 +2,61 @@ class APIFeatures {
   query: any;
   queryString: any;
   totalCount: number | null = null;
+  searchConditions: any = null;
 
   constructor(query: any, queryString: any) {
     this.query = query;
     this.queryString = queryString;
   }
 
+  search() {
+    if (this.queryString.search) {
+      const searchTerm = this.queryString.search;
+      const searchRegex = { $regex: searchTerm, $options: 'i' }; // Case-insensitive search
+
+      // Store search conditions to merge with filter conditions
+      this.searchConditions = {
+        $or: [
+          { carRegistrationNumber: searchRegex },
+          { phoneNumber: searchRegex },
+          { color: searchRegex },
+          { vehicleType: searchRegex },
+          { note: searchRegex }
+        ]
+      };
+    }
+
+    return this;
+  }
+
   filter() {
     const queryObj = { ...this.queryString };
-    const excludedFields = ['page', 'sort', 'limit', 'fields'];
+    const excludedFields = ['page', 'sort', 'limit', 'fields', 'search'];
     excludedFields.forEach(el => delete queryObj[el]);
 
     // 1B) Advanced filtering
     let queryStr = JSON.stringify(queryObj);
     queryStr = queryStr.replace(/\b(gte|gt|lte|lt)\b/g, match => `$${match}`);
+    const filterConditions = JSON.parse(queryStr);
 
-    this.query = this.query.find(JSON.parse(queryStr));
+    // Merge search conditions with filter conditions
+    let finalConditions = filterConditions;
+    if (this.searchConditions) {
+      if (Object.keys(filterConditions).length > 0) {
+        // Both search and filter conditions exist - combine with $and
+        finalConditions = {
+          $and: [
+            this.searchConditions,
+            filterConditions
+          ]
+        };
+      } else {
+        // Only search conditions exist
+        finalConditions = this.searchConditions;
+      }
+    }
+
+    this.query = this.query.find(finalConditions);
 
     return this;
   }

@@ -60,12 +60,16 @@ const bookingSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['in progress', 'completed'],
-    default: 'completed'
+    enum: ['in progress', 'completed', 'cancelled'],
+    default: 'in progress'
   },
   attendantPaid: {
     type: Boolean,
     default: false
+  },
+  note: {
+    type: String,
+    trim: true
   },
   createdAt: {
     type: Date,

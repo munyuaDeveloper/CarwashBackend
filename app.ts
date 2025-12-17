@@ -12,6 +12,7 @@ import globalErrorHandler from './controllers/errorController';
 import userRouter from './routes/userRoutes';
 import bookingRouter from './routes/bookingRoutes';
 import walletRouter from './routes/walletRoutes';
+import statsRouter from './routes/statsRoutes';
 
 // Extend Request interface to include custom properties
 declare global {
@@ -86,6 +87,7 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 app.use('/api/v1/users', userRouter);
 app.use('/api/v1/bookings', bookingRouter);
 app.use('/api/v1/wallets', walletRouter);
+app.use('/api/v1/stats', statsRouter);
 
 app.all('*', (req: Request, _res: Response, next: NextFunction) => {
   next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));

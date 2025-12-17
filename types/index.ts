@@ -84,6 +84,7 @@ export interface IBooking extends Document {
   paymentType: 'attendant_cash' | 'admin_cash' | 'admin_till';
   status: 'pending' | 'in progress' | 'completed' | 'cancelled';
   attendantPaid: boolean;
+  note?: string;
   createdAt: Date;
   updatedAt: Date;
 }
