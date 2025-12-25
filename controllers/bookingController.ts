@@ -93,15 +93,17 @@ const bookingController = {
     // Create new booking
     const newBooking = await Booking.create(bookingData);
 
-    // Update wallet balance when booking is created
-    try {
-      const wallet = await Wallet.getOrCreateWallet(attendant);
-      // Always set isPaid to false when a new booking is created
-      wallet.isPaid = false;
-      await wallet['calculateBalanceFromBookings']();
-    } catch (error) {
-      console.error('Error updating wallet balance:', error);
-      // Don't fail the booking creation if wallet update fails
+    // If booking is created as completed, add it to wallet balance
+    // Otherwise, wallet balance remains unchanged (starts at 0)
+    if (newBooking.status === 'completed') {
+      try {
+        const wallet = await Wallet.getOrCreateWallet(attendant);
+        wallet.isPaid = false;
+        await wallet['addCompletedBooking'](newBooking.amount, newBooking.paymentType);
+      } catch (error) {
+        console.error('Error updating wallet balance:', error);
+        // Don't fail the booking creation if wallet update fails
+      }
     }
 
     // Populate attendant details
@@ -212,30 +214,64 @@ const bookingController = {
 
     // Determine final attendant for wallet calculations
     const finalAttendant = attendant || originalBooking.attendant;
+    const originalAttendant = originalBooking.attendant;
 
     // Check if wallet-affecting fields have changed
     const amountChanged = amount !== undefined && amount !== originalBooking.amount;
-    const attendantChanged = attendant !== undefined && attendant.toString() !== originalBooking.attendant.toString();
+    const attendantChanged = attendant !== undefined && attendant.toString() !== originalAttendant.toString();
     const paymentTypeChanged = paymentType !== undefined && paymentType !== originalBooking.paymentType;
+    const statusChanged = status !== undefined && status !== originalBooking.status;
+    const statusChangedToCompleted = statusChanged && status === 'completed';
+    const statusChangedFromCompleted = statusChanged && originalBooking.status === 'completed' && status !== 'completed';
+    const wasCompleted = originalBooking.status === 'completed';
+    const finalAmount = amount !== undefined ? amount : originalBooking.amount;
+    const finalPaymentType = paymentType !== undefined ? paymentType : originalBooking.paymentType;
 
-    // If any wallet-affecting field changed, recalculate wallet balances
-    if (amountChanged || attendantChanged || paymentTypeChanged) {
-      try {
-        // Recalculate wallet balance for the original attendant
-        if (originalBooking.attendant) {
-          const originalWallet = await Wallet.getOrCreateWallet(originalBooking.attendant);
-          await originalWallet['calculateBalanceFromBookings']();
-        }
-
-        // Recalculate wallet balance for the new attendant if different
-        if (attendantChanged && finalAttendant) {
-          const newWallet = await Wallet.getOrCreateWallet(finalAttendant);
-          await newWallet['calculateBalanceFromBookings']();
-        }
-      } catch (error) {
-        console.error('Error updating wallet balances:', error);
-        // Don't fail the booking update if wallet update fails, but log the error
+    // Update wallet balances incrementally
+    try {
+      // Case 1: Status changed from completed to something else - remove from wallet
+      if (statusChangedFromCompleted) {
+        const originalWallet = await Wallet.getOrCreateWallet(originalAttendant);
+        await originalWallet['removeCompletedBooking'](originalBooking.amount, originalBooking.paymentType);
       }
+
+      // Case 2: Status changed to completed - add to wallet
+      if (statusChangedToCompleted) {
+        const targetWallet = await Wallet.getOrCreateWallet(finalAttendant);
+        await targetWallet['addCompletedBooking'](finalAmount, finalPaymentType);
+      }
+
+      // Case 3: Booking was completed and amount/paymentType changed - update incrementally
+      if (wasCompleted && !statusChanged && (amountChanged || paymentTypeChanged)) {
+        const originalWallet = await Wallet.getOrCreateWallet(originalAttendant);
+        // Remove old booking contribution
+        await originalWallet['removeCompletedBooking'](originalBooking.amount, originalBooking.paymentType);
+        // Add new booking contribution
+        await originalWallet['addCompletedBooking'](finalAmount, finalPaymentType);
+      }
+
+      // Case 4: Booking was completed and attendant changed - move between wallets
+      if (wasCompleted && attendantChanged) {
+        // Remove from original attendant's wallet
+        const originalWallet = await Wallet.getOrCreateWallet(originalAttendant);
+        await originalWallet['removeCompletedBooking'](finalAmount, finalPaymentType);
+        // Add to new attendant's wallet
+        const newWallet = await Wallet.getOrCreateWallet(finalAttendant);
+        await newWallet['addCompletedBooking'](finalAmount, finalPaymentType);
+      }
+
+      // Case 5: Booking was completed, attendant changed, AND amount/paymentType changed
+      if (wasCompleted && attendantChanged && (amountChanged || paymentTypeChanged)) {
+        // Remove old booking from original attendant
+        const originalWallet = await Wallet.getOrCreateWallet(originalAttendant);
+        await originalWallet['removeCompletedBooking'](originalBooking.amount, originalBooking.paymentType);
+        // Add new booking to new attendant
+        const newWallet = await Wallet.getOrCreateWallet(finalAttendant);
+        await newWallet['addCompletedBooking'](finalAmount, finalPaymentType);
+      }
+    } catch (error) {
+      console.error('Error updating wallet balances:', error);
+      // Don't fail the booking update if wallet update fails, but log the error
     }
 
     const booking = await Booking.findByIdAndUpdate(
@@ -279,13 +315,15 @@ const bookingController = {
       return next(new AppError('Booking not found', 404));
     }
 
-    // Update wallet balance after deleting the booking
-    try {
-      const wallet = await Wallet.getOrCreateWallet(booking.attendant);
-      await wallet['calculateBalanceFromBookings']();
-    } catch (error) {
-      console.error('Error updating wallet balance for deleted booking:', error);
-      // Don't fail the deletion if wallet update fails, but log the error
+    // Remove booking from wallet balance if it was completed
+    if (booking.status === 'completed') {
+      try {
+        const wallet = await Wallet.getOrCreateWallet(booking.attendant);
+        await wallet['removeCompletedBooking'](booking.amount, booking.paymentType);
+      } catch (error) {
+        console.error('Error updating wallet balance for deleted booking:', error);
+        // Don't fail the deletion if wallet update fails, but log the error
+      }
     }
 
     // Delete the booking

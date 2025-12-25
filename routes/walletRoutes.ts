@@ -21,12 +21,14 @@ router.get('/unpaid', walletController.getUnpaidWallets);
 router.get('/debt-summary', walletController.getCompanyDebtSummary);
 router.get('/system', walletController.getSystemWallet);
 router.get('/system/summary', walletController.getSystemWalletSummary);
-router.get('/:attendantId', walletController.getAttendantWallet);
+router.get('/bookings/:bookingId', walletController.getBookingDetails);
+router.post('/settle', walletController.settleAttendantBalances);
+// Specific routes before parameterized routes
 router.get('/:attendantId/debt', walletController.getAttendantDebt);
 router.get('/:attendantId/bookings', walletController.getAttendantBookings);
 router.patch('/:attendantId/mark-paid', walletController.markAttendantPaid);
 router.patch('/:attendantId/rebuild', walletController.rebuildWalletBalance);
-router.get('/bookings/:bookingId', walletController.getBookingDetails);
-router.post('/settle', walletController.settleAttendantBalances);
+router.patch('/:attendantId/adjust', walletController.adjustAttendantWallet);
+router.get('/:attendantId', walletController.getAttendantWallet);
 
 export default router;

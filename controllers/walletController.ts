@@ -30,16 +30,23 @@ const walletController = {
     }
 
     const wallet = await Wallet.getOrCreateWallet(req.user._id);
-    // Calculate balance from bookings for the specified date
-    await wallet['calculateBalanceFromBookings'](targetDate);
     await wallet.populate('attendant', 'name email role');
+
+    // If date is specified, calculate balance for that specific date (for reporting)
+    // Otherwise, return stored balance
+    const responseData: any = {
+      wallet,
+      date: targetDate ? targetDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+    };
+
+    if (targetDate) {
+      const dateBalance = await wallet['calculateBalanceFromBookings'](targetDate);
+      responseData.dateBalance = dateBalance;
+    }
 
     res.status(200).json({
       status: 'success',
-      data: {
-        wallet,
-        date: targetDate ? targetDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
-      }
+      data: responseData
     });
   }),
 
@@ -76,15 +83,21 @@ const walletController = {
     }
 
     const wallet = await Wallet.getOrCreateWallet(attendantId);
-    // Calculate balance from bookings for the specified date
-    await wallet['calculateBalanceFromBookings'](targetDate);
     await wallet.populate('attendant', 'name email role');
+
+    // If date is specified, calculate balance for that specific date (for reporting)
+    // Otherwise, return stored balance
+    let dateBalance = null;
+    if (targetDate) {
+      dateBalance = await wallet['calculateBalanceFromBookings'](targetDate);
+    }
 
     res.status(200).json({
       status: 'success',
       data: {
         wallet,
-        date: targetDate ? targetDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+        date: targetDate ? targetDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        ...(dateBalance ? { dateBalance } : {})
       }
     });
   }),
@@ -156,17 +169,10 @@ const walletController = {
         }
       });
     } else {
-      // If no date specified, get all wallets (current behavior)
+      // If no date specified, get all wallets with stored balances (no recalculation for performance)
       const wallets = await Wallet.find()
         .populate('attendant', 'name email role')
         .sort({ createdAt: -1 });
-
-      // Calculate balance for all wallets for current date
-      for (const wallet of wallets) {
-        await wallet['calculateBalanceFromBookings']();
-        // Ensure the wallet is saved with updated isPaid status
-        await wallet.save();
-      }
 
       res.status(200).json({
         status: 'success',
@@ -218,8 +224,7 @@ const walletController = {
     );
 
     await wallet.resetWallet();
-    // Recalculate balance from bookings after reset
-    await wallet['calculateBalanceFromBookings']();
+    // Balance is now 0 after reset. New bookings will be added incrementally.
     await wallet.populate('attendant', 'name email role');
 
     res.status(200).json({
@@ -346,10 +351,7 @@ const walletController = {
         .populate('attendant', 'name email role')
         .sort({ balance: -1 });
 
-      // Calculate balance for all wallets
-      for (const wallet of wallets) {
-        await wallet['calculateBalanceFromBookings']();
-      }
+      // Wallets already have stored balances, no need to recalculate
 
       res.status(200).json({
         status: 'success',
@@ -412,8 +414,7 @@ const walletController = {
     }
 
     const wallet = await Wallet.getOrCreateWallet(attendantId);
-    // Calculate balance from bookings
-    await wallet['calculateBalanceFromBookings']();
+    // Wallet already has stored balance, no need to recalculate
     await wallet.populate('attendant', 'name email role');
 
     res.status(200).json({
@@ -504,7 +505,7 @@ const walletController = {
     }
 
     const wallet = await Wallet.getOrCreateWallet(attendantId);
-    await wallet['calculateBalanceFromBookings']();
+    await wallet['rebuildWalletBalance']();
 
     res.status(200).json({
       status: 'success',
@@ -637,8 +638,7 @@ const walletController = {
 
         // Reset wallet
         await wallet.resetWallet();
-        // Recalculate balance from today's bookings after reset
-        await wallet['calculateBalanceFromBookings']();
+        // Balance is now 0 after reset. New bookings will be added incrementally.
         await wallet.populate('attendant', 'name email role');
 
         settledWallets.push({
@@ -759,6 +759,90 @@ const walletController = {
       status: 'success',
       data: {
         summary
+      }
+    });
+  }),
+
+  // Add tip or deduction to attendant wallet (admin only)
+  adjustAttendantWallet: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
+    if (!req.user || req.user.role !== 'admin') {
+      return next(new AppError('Only admins can adjust attendant wallets', 403));
+    }
+
+    const { attendantId } = req.params;
+    const { amount, type, reason } = req.body;
+
+    // Validate attendant ID
+    if (!attendantId || !attendantId.match(/^[0-9a-fA-F]{24}$/)) {
+      return next(new AppError('Invalid attendant ID format', 400));
+    }
+
+    // Validate amount
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
+      return next(new AppError('Amount must be a positive number', 400));
+    }
+
+    // Validate type
+    if (!type || (type !== 'tip' && type !== 'deduction')) {
+      return next(new AppError('Type must be either "tip" or "deduction"', 400));
+    }
+
+    // Check if attendant exists
+    const attendant = await User.findById(attendantId);
+    if (!attendant) {
+      return next(new AppError('Attendant not found', 404));
+    }
+
+    if (attendant.role !== 'attendant') {
+      return next(new AppError('User is not an attendant', 400));
+    }
+
+    // Get or create wallet (this will calculate balance from bookings)
+    const wallet = await Wallet.getOrCreateWallet(attendantId);
+
+    // Initialize adjustments array if it doesn't exist
+    if (!(wallet as any).adjustments) {
+      (wallet as any).adjustments = [];
+    }
+
+    // Add adjustment to the adjustments array
+    const adjustment = {
+      type: type as 'tip' | 'deduction',
+      amount,
+      reason: reason || null,
+      adjustedBy: req.user.name,
+      adjustedAt: new Date()
+    };
+
+    (wallet as any).adjustments.push(adjustment);
+
+    // Mark adjustments array as modified so Mongoose saves it
+    wallet.markModified('adjustments');
+
+    // Save wallet to persist the adjustment
+    await wallet.save();
+
+    // Apply adjustment to balance incrementally
+    if (type === 'tip') {
+      wallet.balance = (wallet.balance || 0) + amount;
+    } else {
+      wallet.balance = (wallet.balance || 0) - amount;
+    }
+
+    // Set isPaid to false if balance is not zero
+    if (wallet.balance !== 0) {
+      wallet.isPaid = false;
+    }
+
+    // Save wallet with updated balance
+    await wallet.save();
+    await wallet.populate('attendant', 'name email role');
+
+    res.status(200).json({
+      status: 'success',
+      message: `${type === 'tip' ? 'Tip' : 'Deduction'} of ${amount} ${type === 'tip' ? 'added to' : 'deducted from'} attendant wallet successfully`,
+      data: {
+        wallet
       }
     });
   })

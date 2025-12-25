@@ -89,6 +89,15 @@ export interface IBooking extends Document {
   updatedAt: Date;
 }
 
+// Wallet adjustment type
+export interface IWalletAdjustment {
+  type: 'tip' | 'deduction';
+  amount: number;
+  reason: string | null;
+  adjustedBy: string;
+  adjustedAt: Date;
+}
+
 // Wallet related types
 export interface IWallet extends Document {
   _id: string;
@@ -100,10 +109,21 @@ export interface IWallet extends Document {
   companyDebt: number; // How much attendant owes company
   lastPaymentDate: Date | null;
   isPaid: boolean;
+  adjustments?: IWalletAdjustment[];
   createdAt: Date;
   updatedAt: Date;
   resetWallet(): Promise<IWallet>;
-  calculateBalanceFromBookings(targetDate?: Date): Promise<IWallet>;
+  addCompletedBooking(amount: number, paymentType: string): Promise<IWallet>;
+  removeCompletedBooking(amount: number, paymentType: string): Promise<IWallet>;
+  updateCompletedBooking(oldAmount: number, oldPaymentType: string, newAmount: number, newPaymentType: string): Promise<IWallet>;
+  rebuildWalletBalance(): Promise<IWallet>;
+  calculateBalanceFromBookings(targetDate?: Date): Promise<{
+    balance: number;
+    totalEarnings: number;
+    totalCommission: number;
+    totalCompanyShare: number;
+    companyDebt: number;
+  }>;
 }
 
 // Wallet model static methods
