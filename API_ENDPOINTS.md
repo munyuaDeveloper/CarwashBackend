@@ -67,21 +67,35 @@ curl -X PATCH http://localhost:3000/api/v1/users/updateMyPassword \
   }'
 ```
 
+### 7. Update Current User Details (Authenticated)
+```bash
+curl -X PATCH http://localhost:3000/api/v1/users/updateMe \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "name": "Updated Name",
+    "email": "updated@example.com",
+    "photo": "new-photo.jpg"
+  }'
+```
+
+**Note:** This endpoint allows updating name, email, and photo only. Password and role cannot be updated through this endpoint. Use `/updateMyPassword` for password updates.
+
 ## User Management Endpoints
 
-### 7. Get Current User
+### 8. Get Current User
 ```bash
 curl -X GET http://localhost:3000/api/v1/users/me \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 8. Delete Current User Account
+### 9. Delete Current User Account
 ```bash
 curl -X DELETE http://localhost:3000/api/v1/users/deleteMe \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 9. Get All Users (Admin Only)
+### 10. Get All Users (Admin Only)
 ```bash
 # Get all users
 curl -X GET http://localhost:3000/api/v1/users \
@@ -96,7 +110,7 @@ curl -X GET "http://localhost:3000/api/v1/users?role=admin" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 10. Create User (Admin Only)
+### 11. Create User (Admin Only)
 ```bash
 curl -X POST http://localhost:3000/api/v1/users \
   -H "Content-Type: application/json" \
@@ -111,13 +125,13 @@ curl -X POST http://localhost:3000/api/v1/users \
   }'
 ```
 
-### 11. Get User by ID (Admin Only)
+### 12. Get User by ID (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/users/USER_ID_HERE \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 12. Update User (Admin Only)
+### 13. Update User (Admin Only)
 ```bash
 curl -X PATCH http://localhost:3000/api/v1/users/USER_ID_HERE \
   -H "Content-Type: application/json" \
@@ -130,7 +144,7 @@ curl -X PATCH http://localhost:3000/api/v1/users/USER_ID_HERE \
   }'
 ```
 
-### 13. Delete User (Admin Only)
+### 14. Delete User (Admin Only)
 ```bash
 curl -X DELETE http://localhost:3000/api/v1/users/USER_ID_HERE \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
@@ -138,13 +152,13 @@ curl -X DELETE http://localhost:3000/api/v1/users/USER_ID_HERE \
 
 ## Booking Management Endpoints
 
-### 14. Get All Bookings
+### 15. Get All Bookings
 ```bash
 curl -X GET http://localhost:3000/api/v1/bookings \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 15. Create Booking (Admin Only)
+### 16. Create Booking (Admin Only)
 
 #### For Vehicle Bookings:
 ```bash
@@ -192,13 +206,13 @@ curl -X POST http://localhost:3000/api/v1/bookings \
 - `phoneNumber` (string): Customer phone number
 - `color` (string): Carpet color
 
-### 16. Get Booking by ID (Admin Only)
+### 17. Get Booking by ID (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/bookings/BOOKING_ID_HERE \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 17. Update Booking (Admin Only)
+### 18. Update Booking (Admin Only)
 
 #### For Vehicle Bookings:
 ```bash
@@ -243,19 +257,19 @@ curl -X PATCH http://localhost:3000/api/v1/bookings/BOOKING_ID_HERE \
 - `paymentType` (string): "attendant_cash", "admin_cash", or "admin_till"
 - `status` (string): "pending", "in progress", "completed", or "cancelled"
 
-### 18. Delete Booking (Admin Only)
+### 19. Delete Booking (Admin Only)
 ```bash
 curl -X DELETE http://localhost:3000/api/v1/bookings/BOOKING_ID_HERE \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 19. Get Bookings by Attendant
+### 20. Get Bookings by Attendant
 ```bash
 curl -X GET http://localhost:3000/api/v1/bookings/attendant/ATTENDANT_ID_HERE \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 20. Get Bookings by Status
+### 21. Get Bookings by Status
 ```bash
 curl -X GET http://localhost:3000/api/v1/bookings/status/pending \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
@@ -263,7 +277,7 @@ curl -X GET http://localhost:3000/api/v1/bookings/status/pending \
 
 ## Wallet Management Endpoints
 
-### 21. Get My Wallet (Attendant Only)
+### 22. Get My Wallet (Attendant Only)
 ```bash
 # Get current day's wallet balance
 curl -X GET http://localhost:3000/api/v1/wallets/my-wallet \
@@ -299,7 +313,7 @@ curl -X GET "http://localhost:3000/api/v1/wallets/my-wallet?date=2024-01-15" \
 }
 ```
 
-### 22. Settle Attendant Balances (Admin Only)
+### 23. Settle Attendant Balances (Admin Only)
 ```bash
 curl -X POST http://localhost:3000/api/v1/wallets/settle \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
@@ -333,7 +347,7 @@ curl -X POST http://localhost:3000/api/v1/wallets/settle \
 }
 ```
 
-### 23. Get Daily Wallet Summary (Admin Only)
+### 24. Get Daily Wallet Summary (Admin Only)
 ```bash
 # Get current day's summary
 curl -X GET http://localhost:3000/api/v1/wallets/daily-summary \
@@ -375,7 +389,7 @@ curl -X GET "http://localhost:3000/api/v1/wallets/daily-summary?date=2024-01-15"
 }
 ```
 
-### 24. Get All Wallets (Admin Only)
+### 25. Get All Wallets (Admin Only)
 ```bash
 # Get current day's wallets
 curl -X GET http://localhost:3000/api/v1/wallets \
@@ -386,25 +400,25 @@ curl -X GET "http://localhost:3000/api/v1/wallets?date=2024-01-15" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 25. Get Wallet Summary (Admin Only)
+### 26. Get Wallet Summary (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/wallets/summary \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 25. Get Company Debt Summary (Admin Only)
+### 27. Get Company Debt Summary (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/wallets/debt-summary \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 26. Get Unpaid Wallets (Admin Only)
+### 28. Get Unpaid Wallets (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/wallets/unpaid \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 27. Get System Wallet (Admin Only)
+### 29. Get System Wallet (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/wallets/system \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
@@ -429,7 +443,7 @@ curl -X GET http://localhost:3000/api/v1/wallets/system \
 }
 ```
 
-### 28. Get System Wallet Summary (Admin Only)
+### 30. Get System Wallet Summary (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/wallets/system/summary \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
@@ -456,25 +470,25 @@ curl -X GET http://localhost:3000/api/v1/wallets/system/summary \
 }
 ```
 
-### 29. Get Attendant Wallet (Admin Only)
+### 31. Get Attendant Wallet (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/wallets/ATTENDANT_ID_HERE \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 30. Get Attendant Debt Details (Admin Only)
+### 32. Get Attendant Debt Details (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/wallets/ATTENDANT_ID_HERE/debt \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 31. Mark Attendant as Paid (Admin Only)
+### 33. Mark Attendant as Paid (Admin Only)
 ```bash
 curl -X PATCH http://localhost:3000/api/v1/wallets/ATTENDANT_ID_HERE/mark-paid \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
-### 32. Rebuild Wallet Balance (Admin Only)
+### 34. Rebuild Wallet Balance (Admin Only)
 ```bash
 curl -X PATCH http://localhost:3000/api/v1/wallets/ATTENDANT_ID_HERE/rebuild \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
@@ -508,7 +522,7 @@ This endpoint is available for manual balance verification if needed.
 }
 ```
 
-### 33. Get Attendant Bookings (Attendant/Admin)
+### 35. Get Attendant Bookings (Attendant/Admin)
 ```bash
 # Get my bookings (attendant)
 curl -X GET http://localhost:3000/api/v1/wallets/my-wallet/bookings \
@@ -546,7 +560,7 @@ curl -X GET http://localhost:3000/api/v1/wallets/ATTENDANT_ID_HERE/bookings \
 }
 ```
 
-### 34. Get Booking Details (Admin Only)
+### 36. Get Booking Details (Admin Only)
 ```bash
 curl -X GET http://localhost:3000/api/v1/wallets/bookings/BOOKING_ID_HERE \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"

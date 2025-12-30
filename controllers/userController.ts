@@ -152,6 +152,52 @@ const userController = {
     });
   }),
 
+  updateMe: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
+    const { name, email, photo } = req.body;
+
+    // Prevent password and role updates through this endpoint
+    if (req.body.password || req.body.passwordConfirm || req.body.role) {
+      return next(
+        new AppError(
+          'This route is not for password or role updates. Use /updateMyPassword for password updates.',
+          400
+        )
+      );
+    }
+
+    // Validate email format if provided
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return next(new AppError('Please provide a valid email', 400));
+    }
+
+    // Build update object with only allowed fields
+    const updateData: any = {};
+    if (name) updateData.name = name;
+    if (email) updateData.email = email;
+    if (photo) updateData.photo = photo;
+
+    // Update user document
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user?._id,
+      updateData,
+      {
+        new: true,
+        runValidators: true
+      }
+    );
+
+    if (!updatedUser) {
+      return next(new AppError('User not found', 404));
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        user: updatedUser
+      }
+    });
+  }),
+
   deleteMe: catchAsync(async (req: IRequestWithUser, res: Response, _next: NextFunction) => {
     await User.findByIdAndUpdate(req.user?._id, { active: false });
 
