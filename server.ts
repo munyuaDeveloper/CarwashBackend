@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import app from './app';
+import { startWalletResetCronJob } from './utils/cronJobs';
 
 process.on('uncaughtException', (err: Error) => {
   console.log('UNCAUGHT EXCEPTION! 💥 Shutting down...');
@@ -15,7 +16,11 @@ const DB = process.env['DATABASE']?.replace(
   process.env['DATABASE_PASSWORD'] || ''
 ) || '';
 
-mongoose.connect(DB).then(() => console.log('DB connection successful!'));
+mongoose.connect(DB).then(() => {
+  console.log('DB connection successful!');
+  // Start cron job after database connection is established
+  startWalletResetCronJob();
+});
 
 const port = process.env['PORT'] || 3000;
 const server = app.listen(port, () => {

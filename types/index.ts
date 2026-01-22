@@ -159,6 +159,26 @@ export interface ISystemWalletModel {
   aggregate(pipeline: any[]): Promise<any[]>;
 }
 
+// Application configuration types
+export interface IAppConfig extends Document {
+  _id: string;
+  autoResetEnabled: boolean;
+  lastResetDate: Date | null;
+  lastResetBy: string | null;
+  settings?: Record<string, any>; // Flexible settings object for additional config fields
+  [key: string]: any; // Allow additional fields for flexibility
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Application configuration model static methods
+export interface IAppConfigModel {
+  getOrCreateConfig(): Promise<IAppConfig>;
+  updateConfig(updates: Partial<IAppConfig> | Record<string, any>): Promise<IAppConfig>;
+  getConfigValue(key: string): Promise<any>;
+  findOne(query?: any): Promise<IAppConfig | null>;
+}
+
 // Environment variables
 export interface IEnvConfig {
   NODE_ENV: string;
