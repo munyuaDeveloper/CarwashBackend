@@ -17,6 +17,22 @@ const bookingSchema = new mongoose.Schema({
     // },
     trim: true
   },
+  customerPhoneNumber: {
+    type: String,
+    trim: true
+  },
+  customerName: {
+    type: String,
+    trim: true
+  },
+  smsConsent: {
+    type: Boolean,
+    default: false
+  },
+  isRewardWash: {
+    type: Boolean,
+    default: false
+  },
   color: {
     type: String,
     required: function (this: any): boolean {
@@ -28,6 +44,21 @@ const bookingSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: [true, 'Attendant is required']
+  },
+  customer: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer',
+    default: null
+  },
+  vehicle: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vehicle',
+    default: null
+  },
+  business: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Business',
+    required: [true, 'Business is required']
   },
   amount: {
     type: Number,
@@ -89,6 +120,7 @@ bookingSchema.index({ phoneNumber: 1 });
 bookingSchema.index({ color: 1 });
 bookingSchema.index({ category: 1 });
 bookingSchema.index({ attendant: 1 });
+bookingSchema.index({ business: 1 });
 bookingSchema.index({ createdAt: -1 });
 
 // Pre-save middleware to update updatedAt

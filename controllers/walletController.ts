@@ -6,6 +6,7 @@ import User from '../models/userModel';
 import Booking from '../models/bookingModel';
 import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
+import APIFeatures from '../utils/apiFeatures';
 
 const walletController = {
   // Get wallet for current attendant
@@ -52,8 +53,8 @@ const walletController = {
 
   // Get wallet for specific attendant (admin only)
   getAttendantWallet: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can access attendant wallets', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can access attendant wallets', 403));
     }
 
     const { attendantId } = req.params;
@@ -104,12 +105,49 @@ const walletController = {
 
   // Get all wallets (admin only)
   getAllWallets: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can access all wallets', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can access all wallets', 403));
     }
 
-    const { date } = req.query;
+    const { date, search, status } = req.query;
+    const page = Math.max(1, Number(req.query['page'] ?? 1));
+    const limit = Math.max(1, Number(req.query['limit'] ?? 20));
     let targetDate: Date | undefined;
+    const queryOptions = { ...req.query, page, limit };
+    const responseDate = () =>
+      targetDate ? targetDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+
+    const baseFilter: any = {};
+    if (status === 'paid') baseFilter.isPaid = true;
+    if (status === 'pending') baseFilter.isPaid = false;
+
+    if (typeof search === 'string' && search.trim().length > 0) {
+      const safeSearch = search.trim();
+      const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escapedSearch, 'i');
+      const orFilters: any[] = [];
+
+      if (safeSearch.match(/^[0-9a-fA-F]{24}$/)) {
+        orFilters.push({ _id: safeSearch });
+        orFilters.push({ attendant: safeSearch });
+      }
+
+      const matchingAttendants = await User.find({
+        $or: [{ name: { $regex: searchRegex } }, { email: { $regex: searchRegex } }]
+      }).select('_id');
+      if (matchingAttendants.length > 0) {
+        orFilters.push({
+          attendant: { $in: matchingAttendants.map(attendant => attendant._id) }
+        });
+      }
+
+      if (orFilters.length > 0) {
+        baseFilter.$or = orFilters;
+      } else {
+        // Ensure no results when search term has no matching wallet/attendant candidates.
+        baseFilter._id = null;
+      }
+    }
 
     // Parse date if provided
     if (date) {
@@ -145,12 +183,21 @@ const walletController = {
 
       const attendantIds = attendantsWithUnpaidBookings.map(item => item._id);
 
-      // Only get wallets for attendants who have unpaid bookings on that date
-      const wallets = await Wallet.find({ attendant: { $in: attendantIds } })
-        .populate('attendant', 'name email role')
-        .sort({ createdAt: -1 });
+      // Only get wallets for attendants who have unpaid bookings on that date.
+      const filterWithDate = {
+        ...baseFilter,
+        attendant: { $in: attendantIds }
+      };
+      const features = new APIFeatures(
+        Wallet.find(filterWithDate).populate('attendant', 'name email role'),
+        queryOptions
+      )
+        .sort()
+        .limitFields();
+      await features.paginate();
+      const wallets = await features.query;
 
-      // Calculate balance for all wallets for the specified date
+      // Calculate balance only for wallets in the requested page.
       const walletsWithBalances = [];
       for (const wallet of wallets) {
         await wallet['calculateBalanceFromBookings'](targetDate);
@@ -163,23 +210,34 @@ const walletController = {
       res.status(200).json({
         status: 'success',
         results: walletsWithBalances.length,
+        total: features.totalCount ?? walletsWithBalances.length,
+        page,
+        limit,
         data: {
           wallets: walletsWithBalances,
-          date: targetDate.toISOString().split('T')[0]
+          date: responseDate()
         }
       });
     } else {
-      // If no date specified, get all wallets with stored balances (no recalculation for performance)
-      const wallets = await Wallet.find()
-        .populate('attendant', 'name email role')
-        .sort({ createdAt: -1 });
+      // If no date specified, use stored balances and APIFeatures pagination.
+      const features = new APIFeatures(
+        Wallet.find(baseFilter).populate('attendant', 'name email role'),
+        queryOptions
+      )
+        .sort()
+        .limitFields();
+      await features.paginate();
+      const wallets = await features.query;
 
       res.status(200).json({
         status: 'success',
         results: wallets.length,
+        total: features.totalCount ?? wallets.length,
+        page,
+        limit,
         data: {
           wallets,
-          date: new Date().toISOString().split('T')[0]
+          date: responseDate()
         }
       });
     }
@@ -187,8 +245,8 @@ const walletController = {
 
   // Mark attendant as paid (admin only)
   markAttendantPaid: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can mark attendants as paid', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can mark attendants as paid', 403));
     }
 
     const { attendantId } = req.params;
@@ -238,8 +296,8 @@ const walletController = {
 
   // Get wallet summary for admin dashboard
   getWalletSummary: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can access wallet summary', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can access wallet summary', 403));
     }
 
     const totalWallets = await Wallet.countDocuments();
@@ -278,8 +336,8 @@ const walletController = {
 
   // Get unpaid wallets (admin only)
   getUnpaidWallets: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can access unpaid wallets', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can access unpaid wallets', 403));
     }
 
     const { date } = req.query;
@@ -366,7 +424,7 @@ const walletController = {
 
   // Get company debt summary (admin only)
   getCompanyDebtSummary: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!req.user || req.user.role !== 'business_admin') {
       return next(new AppError('Only admins can access company debt summary', 403));
     }
 
@@ -393,8 +451,8 @@ const walletController = {
 
   // Get attendant debt details (admin only)
   getAttendantDebt: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can access attendant debt', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can access attendant debt', 403));
     }
 
     const { attendantId } = req.params;
@@ -436,8 +494,8 @@ const walletController = {
 
   // Get system wallet (admin only)
   getSystemWallet: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can access system wallet', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can access system wallet', 403));
     }
 
     const systemWallet = await SystemWallet.getOrCreateSystemWallet();
@@ -452,7 +510,7 @@ const walletController = {
 
   // Get system wallet summary (admin only)
   getSystemWalletSummary: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!req.user || req.user.role !== 'business_admin') {
       return next(new AppError('Only admins can access system wallet summary', 403));
     }
 
@@ -484,7 +542,7 @@ const walletController = {
 
   // Rebuild wallet balance from bookings (admin only)
   rebuildWalletBalance: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!req.user || req.user.role !== 'business_admin') {
       return next(new AppError('Only admins can rebuild wallet balances', 403));
     }
 
@@ -526,7 +584,7 @@ const walletController = {
     const targetAttendantId = attendantId || req.user._id;
 
     // If requesting another attendant's bookings, require admin role
-    if (attendantId && req.user.role !== 'admin') {
+    if (attendantId && req.user.role !== 'business_admin') {
       return next(new AppError('Only admins can view other attendants\' bookings', 403));
     }
 
@@ -549,7 +607,7 @@ const walletController = {
 
   // Get booking history for specific booking
   getBookingDetails: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!req.user || req.user.role !== 'business_admin') {
       return next(new AppError('Only admins can view booking details', 403));
     }
 
@@ -576,7 +634,7 @@ const walletController = {
 
   // Settle balances for specific attendant IDs (Admin Only)
   settleAttendantBalances: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!req.user || req.user.role !== 'business_admin') {
       return next(new AppError('Only admins can settle attendant balances', 403));
     }
 
@@ -667,7 +725,7 @@ const walletController = {
 
   // Get daily wallet summary (Admin Only)
   getDailyWalletSummary: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!req.user || req.user.role !== 'business_admin') {
       return next(new AppError('Only admins can access daily wallet summary', 403));
     }
 
@@ -765,7 +823,7 @@ const walletController = {
 
   // Add tip or deduction to attendant wallet (admin only)
   adjustAttendantWallet: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!req.user || req.user.role !== 'business_admin') {
       return next(new AppError('Only admins can adjust attendant wallets', 403));
     }
 

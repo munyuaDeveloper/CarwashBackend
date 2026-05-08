@@ -22,8 +22,16 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['attendant', 'admin'],
+    enum: ['attendant', 'admin', 'system_admin', 'business_admin'],
     default: 'attendant'
+  },
+  business: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Business',
+    default: null,
+    required: function (this: IUser) {
+      return this.role !== 'system_admin';
+    }
   },
   password: {
     type: String,

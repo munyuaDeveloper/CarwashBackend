@@ -14,6 +14,10 @@ import bookingRouter from './routes/bookingRoutes';
 import walletRouter from './routes/walletRoutes';
 import statsRouter from './routes/statsRoutes';
 import appConfigRouter from './routes/appConfigRoutes';
+import businessRouter from './routes/businessRoutes';
+import loyaltyRouter from './routes/loyaltyRoutes';
+import customerRouter from './routes/customerRoutes';
+import vehicleRouter from './routes/vehicleRoutes';
 
 // Extend Request interface to include custom properties
 declare global {
@@ -90,6 +94,10 @@ app.use('/api/v1/bookings', bookingRouter);
 app.use('/api/v1/wallets', walletRouter);
 app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/config', appConfigRouter);
+app.use('/api/v1/businesses', businessRouter);
+app.use('/api/v1/loyalty', loyaltyRouter);
+app.use('/api/v1/customers', customerRouter);
+app.use('/api/v1/vehicles', vehicleRouter);
 
 app.all('*', (req: Request, _res: Response, next: NextFunction) => {
   next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));

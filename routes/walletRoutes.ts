@@ -11,8 +11,8 @@ router.use(authController.protect);
 router.get('/my-wallet', walletController.getMyWallet);
 router.get('/my-wallet/bookings', walletController.getAttendantBookings);
 
-// Admin routes
-router.use(authController.restrictTo('admin'));
+// Privileged routes
+router.use(authController.restrictTo('admin', 'system_admin', 'business_admin'));
 
 router.get('/', walletController.getAllWallets);
 router.get('/summary', walletController.getWalletSummary);

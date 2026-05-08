@@ -7,8 +7,8 @@ import AppError from '../utils/appError';
 const appConfigController = {
   // Get application configuration (admin only)
   getAppConfig: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can access application configuration', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can access application configuration', 403));
     }
 
     const config = await AppConfig.getOrCreateConfig();
@@ -24,8 +24,8 @@ const appConfigController = {
   // Update application configuration (admin only)
   // Accepts any config field updates for flexibility
   updateAppConfig: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'admin') {
-      return next(new AppError('Only admins can update application configuration', 403));
+    if (!req.user || req.user.role !== 'business_admin') {
+      return next(new AppError('Only business admins can update application configuration', 403));
     }
 
     const updates = req.body;

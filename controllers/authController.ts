@@ -1,6 +1,8 @@
 import { Response, NextFunction } from 'express';
 import { IRequestWithUser } from '../types';
 import User from '../models/userModel';
+import Business from '../models/businessModel';
+import mongoose from 'mongoose';
 import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
 import { createSendToken, verifyToken } from '../utils/jwt';
@@ -9,7 +11,7 @@ import emailService from '../utils/email';
 
 const authController = {
   signup: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    const { name, email, password, passwordConfirm, role } = req.body;
+    const { name, email, password, passwordConfirm, role, business } = req.body;
 
     // Validate required fields
     if (!name || !email || !password || !passwordConfirm) {
@@ -22,8 +24,28 @@ const authController = {
     }
 
     // Validate role if provided
-    if (role && !['attendant', 'admin'].includes(role)) {
-      return next(new AppError('Role must be either "attendant" or "admin"', 400));
+    if (role && !['attendant', 'business_admin', 'system_admin'].includes(role)) {
+      return next(
+        new AppError(
+          'Role must be one of "attendant", "business_admin", "system_admin", or "business_admin"',
+          400
+        )
+      );
+    }
+
+    const targetRole = role || 'attendant';
+    if (targetRole !== 'system_admin' && !business) {
+      return next(new AppError('business is required for non-system_admin users', 400));
+    }
+
+    if (business) {
+      if (!business.match(/^[0-9a-fA-F]{24}$/)) {
+        return next(new AppError('Invalid business ID format', 400));
+      }
+      const businessExists = await Business.findById(business);
+      if (!businessExists) {
+        return next(new AppError('Business not found', 404));
+      }
     }
 
     // Create new user
@@ -32,7 +54,8 @@ const authController = {
       email,
       password,
       passwordConfirm,
-      role: role || 'attendant'
+      role: targetRole,
+      business: targetRole === 'system_admin' ? null : business
     });
 
     // Send welcome email (non-blocking)
@@ -52,7 +75,9 @@ const authController = {
     }
 
     // 2) Check if user exists && password is correct
-    const user = await User.findOne({ email }).select('+password');
+    const user = await User.findOne({ email })
+      .select('+password')
+      .populate('business', 'name');
 
     if (!user || !(await user.correctPassword(password, user.password))) {
       return next(new AppError('Incorrect email or password', 401));
@@ -191,6 +216,44 @@ const authController = {
       return next(
         new AppError('User recently changed password! Please log in again.', 401)
       );
+    }
+
+    // 5) Enforce tenant identity for non-system-admin users
+    if (currentUser.role !== 'system_admin') {
+      const userBusinessId = currentUser.business ? currentUser.business.toString() : null;
+      const tokenBusinessId = decoded.businessId ?? null;
+
+      if (!userBusinessId) {
+        return next(
+          new AppError('User is missing business assignment. Access denied.', 403)
+        );
+      }
+
+      if (!tokenBusinessId) {
+        return next(
+          new AppError('Token is missing business context. Please log in again.', 401)
+        );
+      }
+
+      if (
+        !mongoose.Types.ObjectId.isValid(userBusinessId) ||
+        !mongoose.Types.ObjectId.isValid(tokenBusinessId)
+      ) {
+        return next(new AppError('Invalid business context in authentication data.', 401));
+      }
+
+      if (userBusinessId !== tokenBusinessId) {
+        return next(
+          new AppError('Token business context does not match user business.', 401)
+        );
+      }
+
+      const business = await Business.findById(userBusinessId).select('active');
+      if (!business || business.active === false) {
+        return next(
+          new AppError('Business is invalid or inactive. Access denied.', 403)
+        );
+      }
     }
 
     // GRANT ACCESS TO PROTECTED ROUTE

@@ -8,12 +8,13 @@ export interface IUser extends Document {
   email: string;
   password: string;
   passwordConfirm?: string;
-  role: 'attendant' | 'admin';
+  role: 'attendant' | 'admin' | 'system_admin' | 'business_admin';
   photo: string;
   passwordChangedAt?: Date;
   passwordResetToken?: string;
   passwordResetExpires?: Date;
   active: boolean;
+  business?: string; // ObjectId reference to Business
   wallet?: string; // ObjectId reference to Wallet
   correctPassword(candidatePassword: string, userPassword: string): Promise<boolean>;
   changedPasswordAfter(JWTTimestamp: number): boolean;
@@ -28,6 +29,7 @@ export interface IRequestWithUser extends Request {
 // JWT Payload
 export interface IJWTPayload {
   id: string;
+  businessId?: string | null;
   iat: number;
   exp: number;
 }
@@ -75,8 +77,13 @@ export interface IBooking extends Document {
   _id: string;
   carRegistrationNumber?: string;
   phoneNumber?: string;
+  customerPhoneNumber?: string;
+  customerName?: string;
   color?: string;
+  customer?: string;
+  vehicle?: string;
   attendant: string; // ObjectId reference to User
+  business: string; // ObjectId reference to Business
   amount: number;
   serviceType?: 'full wash' | 'half wash';
   vehicleType?: string;
@@ -85,6 +92,8 @@ export interface IBooking extends Document {
   status: 'pending' | 'in progress' | 'completed' | 'cancelled';
   attendantPaid: boolean;
   note?: string;
+  smsConsent?: boolean;
+  isRewardWash?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -20,17 +20,15 @@ router.get('/me', userController.getMe, userController.getUser);
 
 router.delete('/deleteMe', userController.deleteMe);
 
-router.use(authController.restrictTo('admin'));
-
 router
   .route('/')
-  .get(userController.getAllUsers)
-  .post(userController.createUser);
+  .get(authController.restrictTo('business_admin', 'system_admin'), userController.getAllUsers)
+  .post(authController.restrictTo('business_admin', 'system_admin'), userController.createUser);
 
 router
   .route('/:id')
-  .get(userController.getUser)
-  .patch(userController.updateUser)
-  .delete(userController.deleteUser);
+  .get(authController.restrictTo('business_admin', 'system_admin'), userController.getUser)
+  .patch(authController.restrictTo('business_admin', 'system_admin'), userController.updateUser)
+  .delete(authController.restrictTo('business_admin', 'system_admin'), userController.deleteUser);
 
 export default router;

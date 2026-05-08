@@ -12,12 +12,12 @@ router
   .route('/')
   .get(bookingController.getAllBookings);
 
-// Admin only routes
-router.use(authController.restrictTo('admin'));
-
 router
   .route('/')
-  .post(bookingController.createBooking);
+  .post(authController.restrictTo('admin', 'business_admin'), bookingController.createBooking);
+
+// Privileged routes
+router.use(authController.restrictTo('admin', 'system_admin', 'business_admin'));
 
 router
   .route('/:id')
