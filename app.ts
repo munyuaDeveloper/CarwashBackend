@@ -18,6 +18,7 @@ import businessRouter from './routes/businessRoutes';
 import loyaltyRouter from './routes/loyaltyRoutes';
 import customerRouter from './routes/customerRoutes';
 import vehicleRouter from './routes/vehicleRoutes';
+import textSmsWebhookRouter from './routes/textSmsWebhookRoutes';
 
 // Extend Request interface to include custom properties
 declare global {
@@ -30,6 +31,9 @@ declare global {
 
 // Start express app
 const app: Application = express();
+
+// Required behind ngrok/reverse proxies so rate-limit reads X-Forwarded-For correctly
+app.set('trust proxy', 1);
 
 // 1) GLOBAL MIDDLEWARES
 // Security HTTP headers
@@ -63,11 +67,12 @@ if (process.env['NODE_ENV'] === 'development') {
   app.use(morgan('dev'));
 }
 
-// Limit requests from same API
+// Limit requests from same API (skip webhooks — external providers e.g. TextSMS)
 const limiter = rateLimit({
   max: 100,
   windowMs: 60 * 60 * 1000,
-  message: 'Too many requests from this IP, please try again in an hour!'
+  message: 'Too many requests from this IP, please try again in an hour!',
+  skip: (req) => req.originalUrl.includes('/webhooks/')
 });
 app.use('/api', limiter);
 
@@ -98,6 +103,7 @@ app.use('/api/v1/businesses', businessRouter);
 app.use('/api/v1/loyalty', loyaltyRouter);
 app.use('/api/v1/customers', customerRouter);
 app.use('/api/v1/vehicles', vehicleRouter);
+app.use('/api/v1/webhooks/textsms', textSmsWebhookRouter);
 
 app.all('*', (req: Request, _res: Response, next: NextFunction) => {
   next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));

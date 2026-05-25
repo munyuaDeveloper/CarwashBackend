@@ -32,7 +32,7 @@ const smsLogSchema = new mongoose.Schema(
     },
     gatewayProvider: {
       type: String,
-      default: 'africas_talking'
+      default: 'textsms'
     },
     gatewayMessageId: {
       type: String,
@@ -40,8 +40,23 @@ const smsLogSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['queued', 'sent', 'failed'],
+      enum: ['queued', 'sent', 'delivered', 'failed'],
       default: 'queued'
+    },
+    deliveryStatus: {
+      type: String,
+      enum: ['pending', 'delivered', 'undelivered', 'unknown'],
+      default: 'pending'
+    },
+    deliveryDescription: {
+      type: String,
+      trim: true
+    },
+    deliveredAt: {
+      type: Date
+    },
+    lastCallbackAt: {
+      type: Date
     },
     attempts: {
       type: Number,
@@ -60,6 +75,7 @@ const smsLogSchema = new mongoose.Schema(
 
 smsLogSchema.index({ business: 1, createdAt: -1 });
 smsLogSchema.index({ status: 1, createdAt: -1 });
+smsLogSchema.index({ gatewayMessageId: 1 });
 
 const SmsLog = mongoose.model('SmsLog', smsLogSchema);
 

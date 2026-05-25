@@ -3,15 +3,9 @@ import Business from '../models/businessModel';
 import LoyaltyProfile from '../models/loyaltyProfileModel';
 import SmsTemplate from '../models/smsTemplateModel';
 import SmsLog from '../models/smsLogModel';
+import { normalizeKenyanMobile, sendViaTextSms } from './textSmsService';
 
 type TemplateType = 'loyalty_progress' | 'reward_achievement';
-
-type SmsGatewayResult = {
-  success: boolean;
-  messageId?: string;
-  rawResponse?: unknown;
-  error?: string;
-};
 
 const normalizeVehicleIdentifier = (raw: string): string => raw.toUpperCase().trim();
 
@@ -57,59 +51,6 @@ const fillTemplate = (
     .replaceAll('{required_washes}', String(params.requiredWashes))
     .replaceAll('{{remaining_washes}}', String(params.remainingWashes))
     .replaceAll('{remaining_washes}', String(params.remainingWashes));
-};
-
-const sendViaAfricasTalking = async (to: string, message: string): Promise<SmsGatewayResult> => {
-  const username = process.env['AFRICASTALKING_USERNAME'];
-  const apiKey = process.env['AFRICASTALKING_API_KEY'];
-
-  if (!username || !apiKey) {
-    return {
-      success: false,
-      error: 'Africa\'s Talking credentials are not configured'
-    };
-  }
-
-  try {
-    const response = await fetch('https://api.africastalking.com/version1/messaging', {
-      method: 'POST',
-      headers: {
-        apiKey,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json'
-      },
-      body: new URLSearchParams({
-        username,
-        to,
-        message
-      })
-    });
-
-    const payload = (await response.json().catch(() => ({}))) as {
-      SMSMessageData?: { Recipients?: Array<{ messageId?: string; status?: string }> };
-      errorMessage?: string;
-    };
-
-    if (!response.ok) {
-      return {
-        success: false,
-        error: payload.errorMessage || `Gateway request failed with status ${response.status}`,
-        rawResponse: payload
-      };
-    }
-
-    const firstRecipient = payload.SMSMessageData?.Recipients?.[0];
-    return {
-      success: true,
-      ...(firstRecipient?.messageId ? { messageId: firstRecipient.messageId } : {}),
-      rawResponse: payload
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown SMS gateway error'
-    };
-  }
 };
 
 export const processCompletedBookingLoyalty = async (bookingId: string): Promise<void> => {
@@ -171,7 +112,8 @@ export const processCompletedBookingLoyalty = async (bookingId: string): Promise
   if (!shouldSendSms) return;
   const customerPhone = profile['customerPhoneNumber'];
   if (typeof customerPhone !== 'string' || customerPhone.trim().length === 0) return;
-  const recipientPhone = customerPhone.trim();
+  const recipientPhone =
+    normalizeKenyanMobile(customerPhone.trim()) || customerPhone.trim();
 
   const completedInCycle = profile['totalCompletedPaidWashes'] % washesRequired;
   const remaining = completedInCycle === 0 ? 0 : washesRequired - completedInCycle;
@@ -199,10 +141,13 @@ export const processCompletedBookingLoyalty = async (bookingId: string): Promise
     templateType: messageType,
     recipientPhone,
     message,
+    gatewayProvider: 'textsms',
     status: 'queued'
   });
 
-  const gatewayResult = await sendViaAfricasTalking(recipientPhone, message);
+  const gatewayResult = await sendViaTextSms(recipientPhone, message, {
+    clientSmsId: smsLog._id.toString()
+  });
   const nextAttempts = (smsLog['attempts'] || 0) + 1;
   await SmsLog.findByIdAndUpdate(smsLog._id, {
     status: gatewayResult.success ? 'sent' : 'failed',

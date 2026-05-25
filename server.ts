@@ -16,28 +16,40 @@ const DB = process.env['DATABASE']?.replace(
   process.env['DATABASE_PASSWORD'] || ''
 ) || '';
 
-mongoose.connect(DB).then(() => {
-  console.log('DB connection successful!');
-  // Start cron job after database connection is established
-  startWalletResetCronJob();
-});
-
 const port = process.env['PORT'] || 3000;
-const server = app.listen(port, () => {
-  console.log(`App running on port ${port}...`);
-});
+let server: ReturnType<typeof app.listen>;
+
+mongoose
+  .connect(DB)
+  .then(() => {
+    console.log('DB connection successful!');
+    startWalletResetCronJob();
+
+    server = app.listen(port, () => {
+      console.log(`App running on port ${port}...`);
+      console.log(`TextSMS webhook: http://localhost:${port}/api/v1/webhooks/textsms/callback`);
+    });
+  })
+  .catch((err: Error) => {
+    console.error('DB connection failed:', err.message);
+    process.exit(1);
+  });
 
 process.on('unhandledRejection', (err: Error) => {
   console.log('UNHANDLED REJECTION! 💥 Shutting down...');
   console.log(err.name, err.message);
-  server.close(() => {
+  if (server) {
+    server.close(() => process.exit(1));
+  } else {
     process.exit(1);
-  });
+  }
 });
 
 process.on('SIGTERM', () => {
   console.log('👋 SIGTERM RECEIVED. Shutting down gracefully');
-  server.close(() => {
-    console.log('💥 Process terminated!');
-  });
+  if (server) {
+    server.close(() => {
+      console.log('💥 Process terminated!');
+    });
+  }
 });
