@@ -40,7 +40,7 @@ const smsLogSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['queued', 'sent', 'delivered', 'failed'],
+      enum: ['queued', 'sent', 'delivered', 'failed', 'skipped'],
       default: 'queued'
     },
     deliveryStatus: {

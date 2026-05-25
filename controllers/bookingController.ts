@@ -232,7 +232,9 @@ const bookingController = {
         const wallet = await Wallet.getOrCreateWallet(attendant);
         wallet.isPaid = false;
         await wallet['addCompletedBooking'](newBooking.amount, newBooking.paymentType);
-        await processCompletedBookingLoyalty(newBooking._id.toString());
+        if (!newBooking['loyaltyProcessed']) {
+          await processCompletedBookingLoyalty(newBooking._id.toString());
+        }
       } catch (error) {
         console.error('Error updating wallet balance:', error);
         // Don't fail the booking creation if wallet update fails
@@ -514,6 +516,7 @@ const bookingController = {
       Booking.findByIdAndUpdate(
         req.params['id'],
         {
+          ...(statusChangedFromCompleted ? { loyaltyProcessed: false } : {}),
           ...(carRegistrationNumber && { carRegistrationNumber: carRegistrationNumber.toUpperCase().trim() }),
           ...(phoneNumber && { phoneNumber: phoneNumber.trim() }),
           ...(color && { color: color.trim() }),
@@ -561,12 +564,21 @@ const bookingController = {
       return next(new AppError('Booking not found', 404));
     }
 
-    if (booking.status === 'completed' && originalBooking.status !== 'completed') {
+    if (booking.status === 'completed' && !booking['loyaltyProcessed']) {
       try {
         await processCompletedBookingLoyalty(booking._id.toString());
       } catch (error) {
         console.error('Error processing loyalty for completed booking:', error);
+        if (process.env['NODE_ENV'] === 'development' && error instanceof Error) {
+          console.error(error.stack);
+        }
       }
+    } else if (
+      process.env['NODE_ENV'] === 'development' &&
+      booking.status === 'completed' &&
+      booking['loyaltyProcessed']
+    ) {
+      console.warn(`[loyalty] booking ${booking._id.toString()} already marked loyaltyProcessed`);
     }
 
     res.status(200).json({

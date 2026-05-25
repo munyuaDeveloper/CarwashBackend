@@ -2,6 +2,7 @@ import { NextFunction, Response } from 'express';
 import { IRequestWithUser } from '../types';
 import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
+import APIFeatures from '../utils/apiFeatures';
 import Business from '../models/businessModel';
 import SmsTemplate from '../models/smsTemplateModel';
 import LoyaltyProfile from '../models/loyaltyProfileModel';
@@ -274,15 +275,57 @@ const loyaltyController = {
 
   getSmsLogs: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
     const businessId = getBusinessContext(req);
-    const query: Record<string, unknown> = {};
-    if (businessId) query['business'] = businessId;
+    const baseFilter: Record<string, unknown> = {};
+    if (businessId) baseFilter['business'] = businessId;
     if (req.user?.role !== 'system_admin' && req.user?.role !== 'admin' && !businessId) {
       return next(new AppError('Business context is required', 400));
     }
-    const logs = await SmsLog.find(query).sort({ createdAt: -1 }).limit(200);
+
+    const { search } = req.query;
+    if (typeof search === 'string' && search.trim().length > 0) {
+      const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escaped, 'i');
+      baseFilter['$or'] = [
+        { recipientPhone: { $regex: searchRegex } },
+        { message: { $regex: searchRegex } },
+        { gatewayMessageId: { $regex: searchRegex } },
+        { deliveryDescription: { $regex: searchRegex } },
+        { errorMessage: { $regex: searchRegex } },
+        { status: { $regex: searchRegex } }
+      ];
+    }
+
+    const queryForFeatures = { ...req.query } as Record<string, unknown>;
+    delete queryForFeatures['businessId'];
+    if (queryForFeatures['status'] === 'all') delete queryForFeatures['status'];
+    const SMS_LOG_STATUSES = ['queued', 'sent', 'delivered', 'failed', 'skipped'];
+    if (
+      typeof queryForFeatures['status'] === 'string' &&
+      !SMS_LOG_STATUSES.includes(queryForFeatures['status'])
+    ) {
+      delete queryForFeatures['status'];
+    }
+
+    const features = new APIFeatures(
+      SmsLog.find(baseFilter).populate('business', 'name'),
+      queryForFeatures
+    )
+      .filter()
+      .sort()
+      .limitFields();
+
+    await features.paginate();
+
+    const logs = await features.query;
+    const page = Number(req.query['page'] ?? 1);
+    const limit = Number(req.query['limit'] ?? 20);
+
     res.status(200).json({
       status: 'success',
       results: logs.length,
+      total: features.totalCount ?? logs.length,
+      page,
+      limit,
       data: { logs }
     });
   })

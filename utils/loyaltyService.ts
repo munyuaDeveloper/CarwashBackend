@@ -1,5 +1,7 @@
 import Booking from '../models/bookingModel';
 import Business from '../models/businessModel';
+import Customer from '../models/customerModel';
+import Vehicle from '../models/vehicleModel';
 import LoyaltyProfile from '../models/loyaltyProfileModel';
 import SmsTemplate from '../models/smsTemplateModel';
 import SmsLog from '../models/smsLogModel';
@@ -7,9 +9,80 @@ import { normalizeKenyanMobile, sendViaTextSms } from './textSmsService';
 
 type TemplateType = 'loyalty_progress' | 'reward_achievement';
 
+type BookingForLoyalty = {
+  _id: { toString: () => string };
+  business: { toString: () => string };
+  category: string;
+  status: string;
+  amount: number;
+  carRegistrationNumber?: string | null;
+  phoneNumber?: string | null;
+  customerPhoneNumber?: string | null;
+  customerName?: string | null;
+  customer?: unknown;
+  vehicle?: unknown;
+  smsConsent?: boolean;
+  isRewardWash?: boolean;
+  loyaltyProcessed?: boolean;
+};
+
 const normalizeVehicleIdentifier = (raw: string): string => raw.toUpperCase().trim();
 
 const formatPhone = (raw: string): string => raw.trim();
+
+const resolveVehicleIdentifier = async (booking: BookingForLoyalty): Promise<string | null> => {
+  if (typeof booking.carRegistrationNumber === 'string' && booking.carRegistrationNumber.trim()) {
+    return normalizeVehicleIdentifier(booking.carRegistrationNumber);
+  }
+
+  const vehicleRef = booking.vehicle;
+  if (vehicleRef) {
+    if (typeof vehicleRef === 'object' && vehicleRef !== null && 'plate' in vehicleRef) {
+      const plate = (vehicleRef as { plate?: string }).plate;
+      if (plate?.trim()) {
+        return normalizeVehicleIdentifier(plate);
+      }
+    }
+    const vehicleId =
+      typeof vehicleRef === 'object' && vehicleRef !== null && '_id' in vehicleRef
+        ? (vehicleRef as { _id: { toString: () => string } })._id.toString()
+        : String(vehicleRef);
+    const vehicleDoc = await Vehicle.findById(vehicleId).select('plate');
+    if (vehicleDoc?.['plate']) {
+      return normalizeVehicleIdentifier(vehicleDoc['plate']);
+    }
+  }
+
+  if (typeof booking.phoneNumber === 'string' && booking.phoneNumber.trim()) {
+    return normalizeVehicleIdentifier(booking.phoneNumber);
+  }
+
+  return null;
+};
+
+const resolveCustomerContact = async (
+  booking: BookingForLoyalty
+): Promise<{ phone?: string; smsConsent: boolean }> => {
+  let phone = booking.customerPhoneNumber || booking.phoneNumber || undefined;
+  let smsConsent = Boolean(booking.smsConsent);
+
+  const customerRef = booking.customer;
+  if (customerRef) {
+    if (typeof customerRef === 'object' && customerRef !== null) {
+      const customerObj = customerRef as { phoneNumber?: string; smsConsent?: boolean };
+      if (customerObj.phoneNumber) phone = customerObj.phoneNumber;
+      if (customerObj.smsConsent) smsConsent = true;
+    } else {
+      const customer = await Customer.findById(String(customerRef)).select('phoneNumber smsConsent');
+      if (customer) {
+        if (customer['phoneNumber']) phone = customer['phoneNumber'];
+        if (customer['smsConsent']) smsConsent = true;
+      }
+    }
+  }
+
+  return { ...(phone ? { phone } : {}), smsConsent };
+};
 
 const buildDefaultTemplate = (type: TemplateType): string => {
   if (type === 'reward_achievement') {
@@ -53,83 +126,176 @@ const fillTemplate = (
     .replaceAll('{remaining_washes}', String(params.remainingWashes));
 };
 
+const logLoyaltySkip = (bookingId: string, reason: string): void => {
+  if (process.env['NODE_ENV'] === 'development') {
+    console.warn(`[loyalty] skipped booking ${bookingId}: ${reason}`);
+  }
+};
+
 export const processCompletedBookingLoyalty = async (bookingId: string): Promise<void> => {
-  const booking = await Booking.findById(bookingId);
-  if (!booking) return;
-  if (booking.category !== 'vehicle') return;
-  if (booking.status !== 'completed') return;
-  if (booking.amount <= 0) return;
+  const booking = await Booking.findById(bookingId)
+    .populate('vehicle', 'plate')
+    .populate('customer', 'name phoneNumber smsConsent');
+
+  if (!booking) {
+    logLoyaltySkip(bookingId, 'booking not found');
+    return;
+  }
+  if (booking.category !== 'vehicle') {
+    logLoyaltySkip(bookingId, `category is "${booking.category}", not vehicle`);
+    return;
+  }
+  if (booking.status !== 'completed') {
+    logLoyaltySkip(bookingId, `status is "${booking.status}", not completed`);
+    return;
+  }
+  if (booking.amount < 0) {
+    logLoyaltySkip(bookingId, 'amount is negative');
+    return;
+  }
+  if (booking['loyaltyProcessed']) {
+    logLoyaltySkip(bookingId, 'loyalty already processed for this booking');
+    return;
+  }
 
   const business = await Business.findById(booking.business);
-  if (!business || !business['loyaltySettings']?.enabled) return;
+  if (!business || !business['loyaltySettings']?.enabled) {
+    logLoyaltySkip(bookingId, 'loyalty program is not enabled on this business');
+    return;
+  }
 
-  const vehicleIdentifierRaw = booking.carRegistrationNumber || booking.phoneNumber;
-  if (!vehicleIdentifierRaw) return;
-  const vehicleIdentifier = normalizeVehicleIdentifier(vehicleIdentifierRaw);
-  const customerPhoneRaw = booking.customerPhoneNumber || booking.phoneNumber;
+  const vehicleIdentifier = await resolveVehicleIdentifier(booking as BookingForLoyalty);
+  if (!vehicleIdentifier) {
+    logLoyaltySkip(bookingId, 'no vehicle plate or identifier on booking');
+    return;
+  }
 
-  const profile = await LoyaltyProfile.findOneAndUpdate(
-    { business: booking.business, vehicleIdentifier },
-    {
-      $setOnInsert: {
-        business: booking.business,
-        vehicleIdentifier
-      },
-      ...(customerPhoneRaw ? { $set: { customerPhoneNumber: formatPhone(customerPhoneRaw) } } : {}),
-      ...(booking.smsConsent ? { $set: { smsConsent: true } } : {})
-    },
-    { upsert: true, new: true }
+  const { phone: customerPhoneRaw, smsConsent: smsConsentForProfile } = await resolveCustomerContact(
+    booking as BookingForLoyalty
   );
-
-  if (!profile) return;
-  if (profile['lastCompletedBooking']?.toString() === booking._id.toString()) return;
 
   const loyaltySettings = business['loyaltySettings'];
   const washesRequired = Math.max(1, Number(loyaltySettings?.washesRequired || 5));
   const allowRewardWashToAccrue = Boolean(loyaltySettings?.allowRewardWashToAccrue);
+  const shouldAccrueWash = !booking['isRewardWash'] || allowRewardWashToAccrue;
+
+  const contactSet: Record<string, string | boolean> = {};
+  if (customerPhoneRaw) {
+    contactSet['customerPhoneNumber'] = formatPhone(customerPhoneRaw);
+  }
+  if (smsConsentForProfile) {
+    contactSet['smsConsent'] = true;
+  }
+
+  const profileUpdate: Record<string, unknown> = {
+    $set: {
+      lastCompletedBooking: booking._id,
+      ...contactSet
+    },
+    $setOnInsert: {
+      business: booking.business,
+      vehicleIdentifier
+    }
+  };
+
+  if (shouldAccrueWash) {
+    profileUpdate['$inc'] = { totalCompletedPaidWashes: 1 };
+  }
+
+  let profile = await LoyaltyProfile.findOneAndUpdate(
+    { business: booking.business, vehicleIdentifier },
+    profileUpdate,
+    { upsert: true, new: true }
+  );
+
+  if (!profile) {
+    logLoyaltySkip(bookingId, 'failed to upsert loyalty profile');
+    return;
+  }
+
+  if (process.env['NODE_ENV'] === 'development') {
+    console.log(
+      `[loyalty] profile updated for ${vehicleIdentifier}: washes=${profile['totalCompletedPaidWashes']}`
+    );
+  }
 
   let rewardJustEarned = false;
-  if (!booking['isRewardWash'] || allowRewardWashToAccrue) {
-    profile['totalCompletedPaidWashes'] += 1;
+  if (shouldAccrueWash) {
     const completedWashes = profile['totalCompletedPaidWashes'];
-    if (completedWashes % washesRequired === 0) {
+    if (completedWashes > 0 && completedWashes % washesRequired === 0) {
       rewardJustEarned = true;
-      profile['pendingRewards'] += 1;
-      profile['totalRewardsEarned'] += 1;
-      profile['lastRewardEarnedAt'] = new Date();
+      const rewardedProfile = await LoyaltyProfile.findByIdAndUpdate(
+        profile._id,
+        {
+          $inc: { pendingRewards: 1, totalRewardsEarned: 1 },
+          $set: { lastRewardEarnedAt: new Date() }
+        },
+        { new: true }
+      );
+      if (rewardedProfile) {
+        profile = rewardedProfile;
+      }
     }
   }
 
-  profile.set('lastCompletedBooking', booking._id as unknown as string);
-  await profile.save();
+  await Booking.findByIdAndUpdate(bookingId, { loyaltyProcessed: true });
 
-  const shouldSendSms =
-    Boolean(loyaltySettings?.smsEnabled) &&
-    profile['smsConsent'] &&
-    typeof profile['customerPhoneNumber'] === 'string' &&
-    profile['customerPhoneNumber'].trim().length > 0;
+  const completedInCycle = profile['totalCompletedPaidWashes'] % washesRequired;
+  const messageType: TemplateType = rewardJustEarned ? 'reward_achievement' : 'loyalty_progress';
 
-  if (!shouldSendSms) return;
+  const resolveSkipReason = (): string | null => {
+    if (!loyaltySettings?.smsEnabled) return 'SMS notifications are disabled in loyalty settings';
+    if (!profile['smsConsent']) return 'Customer has not consented to SMS';
+    if (
+      typeof profile['customerPhoneNumber'] !== 'string' ||
+      profile['customerPhoneNumber'].trim().length === 0
+    ) {
+      return 'No customer phone number on booking or customer profile';
+    }
+    return null;
+  };
+
+  const skipReason = resolveSkipReason();
+  if (skipReason) {
+    await SmsLog.create({
+      business: booking.business,
+      booking: booking._id,
+      loyaltyProfile: profile._id,
+      templateType: messageType,
+      recipientPhone:
+        (typeof profile['customerPhoneNumber'] === 'string' && profile['customerPhoneNumber'].trim()) ||
+        (customerPhoneRaw ? formatPhone(customerPhoneRaw) : 'unknown'),
+      message: `[Not sent] ${skipReason}`,
+      gatewayProvider: 'textsms',
+      status: 'skipped',
+      errorMessage: skipReason
+    });
+    return;
+  }
+
   const customerPhone = profile['customerPhoneNumber'];
   if (typeof customerPhone !== 'string' || customerPhone.trim().length === 0) return;
   const recipientPhone =
     normalizeKenyanMobile(customerPhone.trim()) || customerPhone.trim();
 
-  const completedInCycle = profile['totalCompletedPaidWashes'] % washesRequired;
-  const remaining = completedInCycle === 0 ? 0 : washesRequired - completedInCycle;
-  const messageType: TemplateType = rewardJustEarned ? 'reward_achievement' : 'loyalty_progress';
+  const remaining =
+    rewardJustEarned || completedInCycle === 0 ? 0 : washesRequired - completedInCycle;
   const template = await resolveTemplate(business._id.toString(), messageType);
-  const customerName = typeof booking['customerName'] === 'string' && booking['customerName'].trim()
-    ? booking['customerName'].trim()
-    : 'Customer';
-  const vehiclePlate = typeof booking.carRegistrationNumber === 'string' && booking.carRegistrationNumber.trim()
-    ? booking.carRegistrationNumber.trim().toUpperCase()
-    : vehicleIdentifier;
+  const customerName =
+    typeof booking['customerName'] === 'string' && booking['customerName'].trim()
+      ? booking['customerName'].trim()
+      : 'Customer';
+  const vehiclePlate =
+    typeof booking.carRegistrationNumber === 'string' && booking.carRegistrationNumber.trim()
+      ? booking.carRegistrationNumber.trim().toUpperCase()
+      : vehicleIdentifier;
   const message = fillTemplate(template, {
     customerName,
     vehiclePlate,
     businessName: business['name'],
-    completedWashes: rewardJustEarned ? washesRequired : completedInCycle,
+    completedWashes: rewardJustEarned
+      ? washesRequired
+      : profile['totalCompletedPaidWashes'] % washesRequired || washesRequired,
     requiredWashes: washesRequired,
     remainingWashes: remaining
   });

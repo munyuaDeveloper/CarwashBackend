@@ -91,7 +91,7 @@ const bookingSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['in progress', 'completed', 'cancelled'],
+    enum: ['pending', 'in progress', 'completed', 'cancelled'],
     default: 'in progress'
   },
   attendantPaid: {
@@ -101,6 +101,10 @@ const bookingSchema = new mongoose.Schema({
   note: {
     type: String,
     trim: true
+  },
+  loyaltyProcessed: {
+    type: Boolean,
+    default: false
   },
   createdAt: {
     type: Date,

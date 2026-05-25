@@ -2,7 +2,11 @@
   "watch": [
     "src",
     "app.ts",
-    "server.ts"
+    "server.ts",
+    "controllers",
+    "utils",
+    "models",
+    "routes"
   ],
   "ext": "ts,js,json",
   "ignore": [

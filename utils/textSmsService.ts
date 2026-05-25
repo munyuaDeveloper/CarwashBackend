@@ -18,7 +18,8 @@ type TextSmsApiResponse = {
   responses?: TextSmsResponseItem[];
 };
 
-const TEXTSMS_DEFAULT_BASE_URL = 'https://textsms.co.ke';
+/** API lives on sms.textsms.co.ke — textsms.co.ke returns 404 for /api/services/sendsms/ */
+const TEXTSMS_DEFAULT_BASE_URL = 'https://sms.textsms.co.ke';
 
 /** Normalize Kenyan numbers to 254XXXXXXXXX for TextSMS. */
 export const normalizeKenyanMobile = (raw: string): string | null => {
@@ -112,9 +113,18 @@ export const sendViaTextSms = async (
     const payload = (await response.json().catch(() => ({}))) as TextSmsApiResponse;
 
     if (!response.ok) {
+      const detail =
+        typeof payload === 'object' &&
+        payload !== null &&
+        'message' in payload &&
+        typeof (payload as { message?: unknown }).message === 'string'
+          ? (payload as { message: string }).message
+          : undefined;
       return {
         success: false,
-        error: `TextSMS request failed with status ${response.status}`,
+        error: detail
+          ? `TextSMS request failed (${response.status}): ${detail}`
+          : `TextSMS request failed with status ${response.status} at ${url}`,
         rawResponse: payload
       };
     }
