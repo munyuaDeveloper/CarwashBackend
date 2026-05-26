@@ -7,10 +7,11 @@ const router: Router = express.Router();
 // Protect all routes after this middleware
 router.use(authController.protect);
 
-// Admin only routes
-router.use(authController.restrictTo('admin'));
-
-router.get('/', statsController.getStats);
+router.get(
+  '/',
+  authController.restrictTo('admin', 'business_admin', 'system_admin'),
+  statsController.getStats
+);
 
 export default router;
 
