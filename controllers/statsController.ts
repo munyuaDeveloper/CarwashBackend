@@ -17,7 +17,7 @@ const statsController = {
       if (!businessId) {
         return next(new AppError('User has no business assignment', 403));
       }
-      businessFilter.business = businessId;
+      businessFilter['business'] = businessId;
     }
 
     const today = new Date();
