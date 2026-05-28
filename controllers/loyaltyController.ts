@@ -1,4 +1,5 @@
 import { NextFunction, Response } from 'express';
+import mongoose from 'mongoose';
 import { IRequestWithUser } from '../types';
 import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
@@ -7,12 +8,13 @@ import Business from '../models/businessModel';
 import SmsTemplate from '../models/smsTemplateModel';
 import LoyaltyProfile from '../models/loyaltyProfileModel';
 import SmsLog from '../models/smsLogModel';
+import { userHasAnyRole, userHasRole } from '../utils/userRoles';
 
 const TEMPLATE_TYPES = ['loyalty_progress', 'reward_achievement'];
 const TEMPLATE_STATUSES = ['draft', 'pending_review', 'approved', 'rejected', 'disabled'];
 
 const getBusinessContext = (req: IRequestWithUser): string | null =>
-  req.user?.role === 'system_admin' || req.user?.role === 'admin'
+  userHasAnyRole(req.user, ['system_admin', 'admin'])
     ? (typeof req.query['businessId'] === 'string' ? req.query['businessId'] : null)
     : (req.user?.business ? req.user.business.toString() : null);
 
@@ -277,7 +279,7 @@ const loyaltyController = {
     const businessId = getBusinessContext(req);
     const baseFilter: Record<string, unknown> = {};
     if (businessId) baseFilter['business'] = businessId;
-    if (req.user?.role !== 'system_admin' && req.user?.role !== 'admin' && !businessId) {
+    if (!userHasAnyRole(req.user, ['system_admin', 'admin']) && !businessId) {
       return next(new AppError('Business context is required', 400));
     }
 
@@ -327,6 +329,136 @@ const loyaltyController = {
       page,
       limit,
       data: { logs }
+    });
+  }),
+
+  getMonthlySmsUsage: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
+    const parsedYear = Number(req.query['year']);
+    const year =
+      Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= 2100
+        ? parsedYear
+        : new Date().getFullYear();
+
+    const businessId = getBusinessContext(req);
+    if (userHasRole(req.user, 'business_admin') && !businessId) {
+      return next(new AppError('Business context is required', 400));
+    }
+
+    const rangeStart = new Date(year, 0, 1);
+    const rangeEnd = new Date(year + 1, 0, 1);
+
+    const matchFilter: Record<string, unknown> = {
+      createdAt: { $gte: rangeStart, $lt: rangeEnd },
+      status: { $nin: ['skipped'] }
+    };
+
+    if (businessId) {
+      if (!mongoose.Types.ObjectId.isValid(businessId)) {
+        return next(new AppError('Invalid business ID', 400));
+      }
+      matchFilter['business'] = new mongoose.Types.ObjectId(businessId);
+    }
+
+    const grouped = await SmsLog.aggregate<{
+      _id: { business: mongoose.Types.ObjectId; month: number };
+      count: number;
+      delivered: number;
+    }>([
+      { $match: matchFilter },
+      {
+        $group: {
+          _id: {
+            business: '$business',
+            month: { $month: '$createdAt' }
+          },
+          count: { $sum: 1 },
+          delivered: {
+            $sum: { $cond: [{ $eq: ['$status', 'delivered'] }, 1, 0] }
+          }
+        }
+      },
+      { $sort: { '_id.business': 1, '_id.month': 1 } }
+    ]);
+
+    const businessIds = [
+      ...new Set(grouped.map((row) => row._id.business.toString()))
+    ];
+
+    const businesses = businessIds.length
+      ? await Business.find({ _id: { $in: businessIds } }).select('name')
+      : [];
+
+    const businessNameById = new Map(
+      businesses.map((business) => [business._id.toString(), business['name'] as string])
+    );
+
+    const rowsMap = new Map<
+      string,
+      {
+        businessId: string;
+        businessName: string;
+        months: Record<string, number>;
+        deliveredByMonth: Record<string, number>;
+        total: number;
+        deliveredTotal: number;
+      }
+    >();
+
+    for (const entry of grouped) {
+      const id = entry._id.business.toString();
+      if (!rowsMap.has(id)) {
+        rowsMap.set(id, {
+          businessId: id,
+          businessName: businessNameById.get(id) ?? 'Unknown business',
+          months: {},
+          deliveredByMonth: {},
+          total: 0,
+          deliveredTotal: 0
+        });
+      }
+
+      const row = rowsMap.get(id)!;
+      const monthKey = String(entry._id.month);
+      row.months[monthKey] = entry.count;
+      row.deliveredByMonth[monthKey] = entry.delivered;
+      row.total += entry.count;
+      row.deliveredTotal += entry.delivered;
+    }
+
+    const monthTotals: Record<string, number> = {};
+    const deliveredMonthTotals: Record<string, number> = {};
+    for (let month = 1; month <= 12; month += 1) {
+      const key = String(month);
+      monthTotals[key] = 0;
+      deliveredMonthTotals[key] = 0;
+    }
+
+    for (const row of rowsMap.values()) {
+      for (const [monthKey, count] of Object.entries(row.months)) {
+        monthTotals[monthKey] = (monthTotals[monthKey] ?? 0) + count;
+      }
+      for (const [monthKey, count] of Object.entries(row.deliveredByMonth)) {
+        deliveredMonthTotals[monthKey] = (deliveredMonthTotals[monthKey] ?? 0) + count;
+      }
+    }
+
+    const rows = Array.from(rowsMap.values()).sort((a, b) =>
+      a.businessName.localeCompare(b.businessName)
+    );
+
+    const grandTotal = rows.reduce((sum, row) => sum + row.total, 0);
+    const deliveredGrandTotal = rows.reduce((sum, row) => sum + row.deliveredTotal, 0);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        year,
+        rows,
+        monthTotals,
+        deliveredMonthTotals,
+        grandTotal,
+        deliveredGrandTotal
+      }
     });
   })
 };

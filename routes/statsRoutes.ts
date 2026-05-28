@@ -13,5 +13,11 @@ router.get(
   statsController.getStats
 );
 
+router.get(
+  '/system-overview',
+  authController.restrictTo('system_admin'),
+  statsController.getSystemOverview
+);
+
 export default router;
 

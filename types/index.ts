@@ -8,7 +8,9 @@ export interface IUser extends Document {
   email: string;
   password: string;
   passwordConfirm?: string;
-  role: 'attendant' | 'admin' | 'system_admin' | 'business_admin';
+  roles: Array<'attendant' | 'admin' | 'system_admin' | 'business_admin'>;
+  /** Primary / legacy single role — mirrors highest role in `roles`. */
+  role?: 'attendant' | 'admin' | 'system_admin' | 'business_admin';
   photo: string;
   passwordChangedAt?: Date;
   passwordResetToken?: string;

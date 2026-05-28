@@ -14,7 +14,7 @@ router
 
 router
   .route('/')
-  .post(authController.restrictTo('business_admin'), bookingController.createBooking);
+  .post(authController.restrictTo('business_admin', 'admin'), bookingController.createBooking);
 
 // Privileged routes
 router.use(authController.restrictTo('admin', 'system_admin', 'business_admin'));

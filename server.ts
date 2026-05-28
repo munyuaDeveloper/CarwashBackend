@@ -1,6 +1,5 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import app from './app';
 import { startWalletResetCronJob } from './utils/cronJobs';
 
 process.on('uncaughtException', (err: Error) => {
@@ -10,6 +9,10 @@ process.on('uncaughtException', (err: Error) => {
 });
 
 dotenv.config({ path: './config.env' });
+
+// Load app after env vars are initialized (email/db config depends on this)
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const app = require('./app').default;
 
 const DB = process.env['DATABASE']?.replace(
   '<PASSWORD>',

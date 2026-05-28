@@ -9,6 +9,7 @@ import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
 import APIFeatures from '../utils/apiFeatures';
 import { processCompletedBookingLoyalty } from '../utils/loyaltyService';
+import { userHasRole } from '../utils/userRoles';
 
 const attachBookingPopulates = (query: any) => {
   if (!query) {
@@ -257,7 +258,7 @@ const bookingController = {
     }
 
     const baseFilter: Record<string, unknown> = {};
-    if (req.user.role !== 'system_admin') {
+    if (!userHasRole(req.user, 'system_admin')) {
       const businessId = req.user.business ? req.user.business.toString() : null;
       if (!businessId) {
         return next(new AppError('User has no business assignment', 403));
@@ -293,7 +294,7 @@ const bookingController = {
       return next(new AppError('Booking not found', 404));
     }
 
-    if (req.user && req.user.role !== 'system_admin') {
+    if (req.user && !userHasRole(req.user, 'system_admin')) {
       const businessId = req.user.business ? req.user.business.toString() : null;
       if (!businessId || booking.business.toString() !== businessId) {
         return next(new AppError('You do not have permission to view this booking', 403));

@@ -8,10 +8,17 @@ import AppError from '../utils/appError';
 import { createSendToken, verifyToken } from '../utils/jwt';
 import crypto from 'crypto';
 import emailService from '../utils/email';
+import {
+  getPrimaryRole,
+  normalizeRoles,
+  syncUserRoles,
+  userHasRole,
+  userHasRouteAccess
+} from '../utils/userRoles';
 
 const authController = {
   signup: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    const { name, email, password, passwordConfirm, role, business } = req.body;
+    const { name, email, password, passwordConfirm, role, roles, business } = req.body;
 
     // Validate required fields
     if (!name || !email || !password || !passwordConfirm) {
@@ -33,7 +40,11 @@ const authController = {
       );
     }
 
-    const targetRole = role || 'attendant';
+    const targetRoles = normalizeRoles(roles ?? role);
+    const targetRole = getPrimaryRole({ roles: targetRoles }) || 'attendant';
+    if (targetRoles.length === 0) {
+      return next(new AppError('At least one role is required', 400));
+    }
     if (targetRole !== 'system_admin' && !business) {
       return next(new AppError('business is required for non-system_admin users', 400));
     }
@@ -54,13 +65,13 @@ const authController = {
       email,
       password,
       passwordConfirm,
+      roles: targetRoles.length > 0 ? targetRoles : [targetRole],
       role: targetRole,
       business: targetRole === 'system_admin' ? null : business
     });
 
-    // Send welcome email (non-blocking)
-    emailService.sendWelcomeEmail(newUser).catch(err => {
-      console.error('Failed to send welcome email:', err);
+    emailService.sendWelcomeEmail(newUser, password).catch((err) => {
+      console.error('Failed to send new user credentials email:', err);
     });
 
     createSendToken(newUser, 201, res);
@@ -76,11 +87,21 @@ const authController = {
 
     // 2) Check if user exists && password is correct
     const user = await User.findOne({ email })
-      .select('+password')
+      .select('+password +active')
+      .setOptions({ includeInactive: true })
       .populate('business', 'name');
 
     if (!user || !(await user.correctPassword(password, user.password))) {
       return next(new AppError('Incorrect email or password', 401));
+    }
+
+    if (user.active === false) {
+      return next(
+        new AppError(
+          'Your account has been deactivated. Please contact your administrator for assistance.',
+          403
+        )
+      );
     }
 
     // 3) If everything ok, send token to client
@@ -108,7 +129,8 @@ const authController = {
 
     // 3) Send it to user's email
     try {
-      const resetURL = `${req.protocol}://${req.get('host')}/api/v1/users/resetPassword/${resetToken}`;
+      const frontendBaseUrl = process.env['FRONTEND_URL'] || 'http://localhost:5173';
+      const resetURL = `${frontendBaseUrl}/reset-password/${resetToken}`;
 
       // Send password reset email
       await emailService.sendPasswordResetEmail(user, resetURL);
@@ -201,11 +223,22 @@ const authController = {
     const decoded = verifyToken(token);
 
     // 3) Check if user still exists
-    const currentUser = await User.findById(decoded.id);
+    const currentUser = await User.findById(decoded.id)
+      .setOptions({ includeInactive: true })
+      .select('+active');
     if (!currentUser) {
       return next(
         new AppError(
           'The user belonging to this token does no longer exist.',
+          401
+        )
+      );
+    }
+
+    if (currentUser.active === false) {
+      return next(
+        new AppError(
+          'Your account has been deactivated. Please contact your administrator for assistance.',
           401
         )
       );
@@ -219,7 +252,7 @@ const authController = {
     }
 
     // 5) Enforce tenant identity for non-system-admin users
-    if (currentUser.role !== 'system_admin') {
+    if (!userHasRole(currentUser, 'system_admin')) {
       const userBusinessId = currentUser.business ? currentUser.business.toString() : null;
       const tokenBusinessId = decoded.businessId ?? null;
 
@@ -251,23 +284,25 @@ const authController = {
       const business = await Business.findById(userBusinessId).select('active');
       if (!business || business.active === false) {
         return next(
-          new AppError('Business is invalid or inactive. Access denied.', 403)
+          new AppError('Your business account is inactive. Please contact support for assistance.', 403)
         );
       }
     }
 
-    // GRANT ACCESS TO PROTECTED ROUTE
+    syncUserRoles(currentUser);
+
     req.user = currentUser;
     next();
   }),
 
   restrictTo: (...roles: string[]) => {
     return (req: IRequestWithUser, _res: Response, next: NextFunction) => {
-      // roles ['admin', 'lead-guide']. role='user'
-      if (!roles.includes(req.user?.role || '')) {
-        return next(
-          new AppError('You do not have permission to perform this action', 403)
-        );
+      if (req.user) {
+        syncUserRoles(req.user);
+      }
+
+      if (!userHasRouteAccess(req.user, roles)) {
+        return next(new AppError('You do not have permission to perform this action', 403));
       }
 
       next();

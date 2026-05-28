@@ -1,4 +1,5 @@
 import { Response, NextFunction } from 'express';
+import { userHasAnyRole } from '../utils/userRoles';
 import { IRequestWithUser } from '../types';
 import AppConfig from '../models/appConfigModel';
 import catchAsync from '../utils/catchAsync';
@@ -7,7 +8,7 @@ import AppError from '../utils/appError';
 const appConfigController = {
   // Get application configuration (admin only)
   getAppConfig: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'business_admin') {
+    if (!req.user || !userHasAnyRole(req.user, ['business_admin', 'admin'])) {
       return next(new AppError('Only business admins can access application configuration', 403));
     }
 
@@ -24,7 +25,7 @@ const appConfigController = {
   // Update application configuration (admin only)
   // Accepts any config field updates for flexibility
   updateAppConfig: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== 'business_admin') {
+    if (!req.user || !userHasAnyRole(req.user, ['business_admin', 'admin'])) {
       return next(new AppError('Only business admins can update application configuration', 403));
     }
 

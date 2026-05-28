@@ -70,5 +70,10 @@ router.get(
   authController.restrictTo('business_admin', 'admin', 'system_admin'),
   loyaltyController.getSmsLogs
 );
+router.get(
+  '/sms-usage/monthly',
+  authController.restrictTo('business_admin', 'admin', 'system_admin'),
+  loyaltyController.getMonthlySmsUsage
+);
 
 export default router;

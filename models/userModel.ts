@@ -3,6 +3,13 @@ import mongoose from 'mongoose';
 import validator from 'validator';
 import bcrypt from 'bcryptjs';
 import { IUser } from '../types';
+import {
+  getPrimaryRole,
+  getUserRoles,
+  requiresBusinessAssignment,
+  validateRoles,
+  VALID_USER_ROLES
+} from '../utils/userRoles';
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -20,23 +27,26 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: 'default.jpg'
   },
+  roles: {
+    type: [String],
+    enum: VALID_USER_ROLES
+  },
+  /** @deprecated Use `roles`. Kept for legacy documents; synced on save. */
   role: {
     type: String,
-    enum: ['attendant', 'admin', 'system_admin', 'business_admin'],
-    default: 'attendant'
+    enum: VALID_USER_ROLES
   },
   business: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Business',
     default: null,
     required: function (this: IUser) {
-      return this.role !== 'system_admin';
+      return requiresBusinessAssignment(getUserRoles(this));
     }
   },
   password: {
     type: String,
     required: [true, 'Please provide a password'],
-    // minlength: 8,
     select: false
   },
   passwordConfirm: {
@@ -45,7 +55,6 @@ const userSchema = new mongoose.Schema({
       return this.isNew || this.isModified('password');
     },
     validate: {
-      // This only works on CREATE and SAVE!!!
       validator: function (this: IUser, el: string): boolean {
         return el === this.password;
       },
@@ -67,14 +76,33 @@ const userSchema = new mongoose.Schema({
   }
 });
 
+userSchema.pre('init', function () {
+  const roles = getUserRoles(this);
+  if (roles.length > 0) {
+    this.roles = roles;
+    (this as any).role = getPrimaryRole(this) ?? roles[0] ?? 'attendant';
+  } else if (this.role) {
+    this.roles = [this.role];
+  }
+});
+
+userSchema.pre('save', function (next) {
+  const roles = getUserRoles(this);
+  const validationError = validateRoles(roles);
+  if (validationError) {
+    return next(new Error(validationError));
+  }
+  if (roles.length > 0) {
+    this.roles = roles;
+    (this as any).role = getPrimaryRole({ roles }) ?? roles[0] ?? 'attendant';
+  }
+  next();
+});
+
 userSchema.pre('save', async function (next) {
-  // Only run this function if password was actually modified
   if (!this.isModified('password')) return next();
 
-  // Hash the password with cost of 12
   this.password = await bcrypt.hash(this.password, 12);
-
-  // Delete passwordConfirm field
   (this as any).passwordConfirm = undefined;
   next();
 });
@@ -87,10 +115,19 @@ userSchema.pre('save', function (next) {
 });
 
 userSchema.pre(/^find/, function (this: any, next) {
-  // this points to the current query
+  if (this.getOptions().includeInactive) {
+    return next();
+  }
   this.find({ active: { $ne: false } });
   next();
 });
+
+userSchema.virtual('primaryRole').get(function (this: IUser) {
+  return getPrimaryRole(this);
+});
+
+userSchema.set('toJSON', { virtuals: true });
+userSchema.set('toObject', { virtuals: true });
 
 userSchema.methods['correctPassword'] = async function (
   candidatePassword: string,
@@ -101,14 +138,9 @@ userSchema.methods['correctPassword'] = async function (
 
 userSchema.methods['changedPasswordAfter'] = function (this: IUser, JWTTimestamp: number): boolean {
   if (this.passwordChangedAt) {
-    const changedTimestamp = Math.floor(
-      this.passwordChangedAt.getTime() / 1000
-    );
-
+    const changedTimestamp = Math.floor(this.passwordChangedAt.getTime() / 1000);
     return JWTTimestamp < changedTimestamp;
   }
-
-  // False means NOT changed
   return false;
 };
 
@@ -119,8 +151,6 @@ userSchema.methods['createPasswordResetToken'] = function (this: IUser): string 
     .createHash('sha256')
     .update(resetToken)
     .digest('hex');
-
-  // console.log({ resetToken }, this.passwordResetToken);
 
   this.passwordResetExpires = new Date(Date.now() + 10 * 60 * 1000);
 

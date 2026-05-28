@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { IJWTPayload } from '../types';
 import User from '../models/userModel';
+import { userHasRole } from './userRoles';
 
 type TokenPayload = {
   id: string;
@@ -22,12 +23,11 @@ const signToken = ({ id, businessId }: TokenPayload): string => {
 };
 
 const createSendToken = async (user: any, statusCode: number, res: any): Promise<void> => {
-  const userBusinessId =
-    user?.role !== 'system_admin'
-      ? (typeof user?.business === 'object' && user?.business?._id
-          ? user.business._id.toString()
-          : user?.business?.toString?.() || null)
-      : undefined;
+  const userBusinessId = !userHasRole(user, 'system_admin')
+    ? (typeof user?.business === 'object' && user?.business?._id
+        ? user.business._id.toString()
+        : user?.business?.toString?.() || null)
+    : undefined;
 
   const token = signToken({
     id: user._id.toString(),

@@ -8,7 +8,7 @@ const router = express.Router();
 router.use(authController.protect);
 
 // Admin routes only
-router.use(authController.restrictTo('admin'));
+router.use(authController.restrictTo('admin', 'business_admin'));
 
 // Get application configuration
 router.get('/', appConfigController.getAppConfig);

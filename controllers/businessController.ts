@@ -5,10 +5,12 @@ import User from '../models/userModel';
 import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
 import APIFeatures from '../utils/apiFeatures';
+import emailService from '../utils/email';
+import { generateDefaultPassword } from '../utils/defaultPassword';
 
 const businessController = {
   createBusiness: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
-    const { name, active, managerName, contactPhone, contactEmail, location } = req.body;
+    const { name, active, managerName, contactPhone, contactEmail, location, defaultPassword } = req.body;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return next(new AppError('Business name is required', 400));
@@ -35,19 +37,79 @@ const businessController = {
       return next(new AppError('location must be a non-empty string', 400));
     }
 
+    if (defaultPassword !== undefined && (typeof defaultPassword !== 'string' || !defaultPassword.trim())) {
+      return next(new AppError('defaultPassword must be a non-empty string', 400));
+    }
+
+    const normalizedContactEmail =
+      typeof contactEmail === 'string' && contactEmail.trim()
+        ? contactEmail.trim().toLowerCase()
+        : null;
+
+    if (normalizedContactEmail) {
+      const existingUser = await User.findOne({ email: normalizedContactEmail });
+      if (existingUser) {
+        return next(new AppError('A user with this contact email already exists', 400));
+      }
+    }
+
     const business = await Business.create({
       name: name.trim(),
       ...(typeof active === 'boolean' ? { active } : {}),
       ...(managerName !== undefined ? { managerName: managerName.trim() } : {}),
       ...(contactPhone !== undefined ? { contactPhone: contactPhone.trim() } : {}),
-      ...(contactEmail !== undefined ? { contactEmail: contactEmail.trim().toLowerCase() } : {}),
+      ...(normalizedContactEmail ? { contactEmail: normalizedContactEmail } : {}),
       ...(location !== undefined ? { location: location.trim() } : {})
     });
+
+    let credentialsEmailSent = false;
+
+    if (normalizedContactEmail) {
+      const resolvedPassword =
+        typeof defaultPassword === 'string' && defaultPassword.trim()
+          ? defaultPassword.trim()
+          : generateDefaultPassword();
+      const adminName =
+        typeof managerName === 'string' && managerName.trim()
+          ? managerName.trim()
+          : `${name.trim()} Admin`;
+
+      try {
+        await User.create({
+          name: adminName,
+          email: normalizedContactEmail,
+          password: resolvedPassword,
+          passwordConfirm: resolvedPassword,
+          roles: ['business_admin'],
+          role: 'business_admin',
+          business: business._id
+        });
+
+        await emailService.sendNewUserCredentialsEmail(
+          { name: adminName, email: normalizedContactEmail },
+          resolvedPassword,
+          { businessName: business.name, roles: ['business_admin'] }
+        );
+        credentialsEmailSent = true;
+      } catch (onboardingError) {
+        await User.deleteMany({ email: normalizedContactEmail, business: business._id });
+        await Business.findByIdAndDelete(business._id);
+        return next(
+          new AppError(
+            onboardingError instanceof Error
+              ? onboardingError.message
+              : 'Failed to create business admin account or send credentials email',
+            500
+          )
+        );
+      }
+    }
 
     res.status(201).json({
       status: 'success',
       data: {
-        business
+        business,
+        credentialsEmailSent
       }
     });
   }),
