@@ -19,6 +19,8 @@ import loyaltyRouter from './routes/loyaltyRoutes';
 import customerRouter from './routes/customerRoutes';
 import vehicleRouter from './routes/vehicleRoutes';
 import textSmsWebhookRouter from './routes/textSmsWebhookRoutes';
+import mpesaRouter from './routes/mpesaRoutes';
+import mpesaWebhookRouter from './routes/mpesaWebhookRoutes';
 
 // Extend Request interface to include custom properties
 declare global {
@@ -104,6 +106,8 @@ app.use('/api/v1/loyalty', loyaltyRouter);
 app.use('/api/v1/customers', customerRouter);
 app.use('/api/v1/vehicles', vehicleRouter);
 app.use('/api/v1/webhooks/textsms', textSmsWebhookRouter);
+app.use('/api/v1/webhooks/mpesa', mpesaWebhookRouter);
+app.use('/api/v1/mpesa', mpesaRouter);
 
 app.all('*', (req: Request, _res: Response, next: NextFunction) => {
   next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));

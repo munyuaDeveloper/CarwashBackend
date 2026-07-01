@@ -58,6 +58,41 @@ const businessSchema = new mongoose.Schema(
         type: Boolean,
         default: false
       }
+    },
+    mpesaSettings: {
+      enabled: {
+        type: Boolean,
+        default: false
+      },
+      environment: {
+        type: String,
+        enum: ['sandbox', 'production'],
+        default: 'sandbox'
+      },
+      shortcodeType: {
+        type: String,
+        enum: ['paybill', 'till'],
+        default: null
+      },
+      businessShortCode: {
+        type: String,
+        trim: true
+      },
+      passkeyEncrypted: {
+        type: String
+      },
+      consumerKey: {
+        type: String,
+        trim: true
+      },
+      consumerSecretEncrypted: {
+        type: String
+      },
+      accountReferencePrefix: {
+        type: String,
+        default: 'WF',
+        trim: true
+      }
     }
   },
   {
