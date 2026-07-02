@@ -4,12 +4,18 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
-const deriveKey = (): Buffer => {
+export const isMpesaEncryptionKeyConfigured = (): boolean => {
   const raw = process.env['MPESA_ENCRYPTION_KEY']?.trim();
   const secret = raw?.replace(/^["']|["']$/g, '') ?? '';
-  if (!secret) {
+  return Boolean(secret);
+};
+
+const deriveKey = (): Buffer => {
+  if (!isMpesaEncryptionKeyConfigured()) {
     throw new Error('MPESA_ENCRYPTION_KEY is not configured');
   }
+  const raw = process.env['MPESA_ENCRYPTION_KEY']!.trim();
+  const secret = raw.replace(/^["']|["']$/g, '');
   return crypto.scryptSync(secret, 'washflow-mpesa-v1', 32);
 };
 

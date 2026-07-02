@@ -1,4 +1,9 @@
-import { decryptMpesaSecret, encryptMpesaSecret, maskSecret } from './mpesaEncryption';
+import {
+  decryptMpesaSecret,
+  encryptMpesaSecret,
+  isMpesaEncryptionKeyConfigured,
+  maskSecret
+} from './mpesaEncryption';
 import type { MpesaBusinessCredentials, MpesaEnvironment, MpesaShortcodeType } from './mpesaService';
 
 export type MpesaOAuthCredentials = {
@@ -185,12 +190,18 @@ export const resolveBusinessMpesaCredentials = (
     throw new Error('M-PESA credentials are incomplete for this business');
   }
 
+  if (!isMpesaEncryptionKeyConfigured()) {
+    throw new Error(
+      'MPESA_ENCRYPTION_KEY is not set on the server. Add it in your deployment environment (e.g. Vercel → Settings → Environment Variables) using the same value that was used when M-PESA credentials were saved.'
+    );
+  }
+
   const passkey = tryDecryptMpesaSecret(settings.passkeyEncrypted);
   const consumerSecret = tryDecryptMpesaSecret(settings.consumerSecretEncrypted);
 
   if (!passkey || !consumerSecret) {
     throw new Error(
-      'Stored M-PESA secrets could not be decrypted. Re-enter passkey and consumer secret in M-PESA settings, then save.'
+      'Stored M-PESA secrets could not be decrypted. The server MPESA_ENCRYPTION_KEY likely does not match the key used when credentials were saved locally. Either set the same key in production, or re-enter passkey and consumer secret in M-PESA settings and save again.'
     );
   }
 
