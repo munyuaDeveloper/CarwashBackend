@@ -8,8 +8,35 @@ import Vehicle from '../models/vehicleModel';
 import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
 import APIFeatures from '../utils/apiFeatures';
-import { processCompletedBookingLoyalty } from '../utils/loyaltyService';
+import Business from '../models/businessModel';
+import { calculateDiscountFromPoints, processCompletedBookingLoyalty } from '../utils/loyaltyService';
+import {
+  ensureCustomerRegistration,
+  ensureVehicleCustomerRegistration
+} from '../utils/customerVehicleService';
+import { normalizePhoneForStorage, normalizePlate } from '../utils/contactNormalization';
 import { userHasRole } from '../utils/userRoles';
+
+const resolveLoyaltyRedemptionFields = async (
+  businessId: string,
+  loyaltyPointsRedeemed?: number
+): Promise<{ loyaltyPointsRedeemed: number; loyaltyDiscountKes: number; isRewardWash: boolean }> => {
+  const points = Math.max(0, Number(loyaltyPointsRedeemed || 0));
+  if (points === 0) {
+    return { loyaltyPointsRedeemed: 0, loyaltyDiscountKes: 0, isRewardWash: false };
+  }
+
+  const business = await Business.findById(businessId).select('loyaltySettings');
+  const settings = business?.['loyaltySettings'];
+  const redemptionPoints = Math.max(1, Number(settings?.redemptionPoints ?? 500));
+  const redemptionValueKes = Math.max(1, Number(settings?.redemptionValueKes ?? 500));
+
+  return {
+    loyaltyPointsRedeemed: points,
+    loyaltyDiscountKes: calculateDiscountFromPoints(points, redemptionPoints, redemptionValueKes),
+    isRewardWash: true
+  };
+};
 
 const attachBookingPopulates = (query: any) => {
   if (!query) {
@@ -44,7 +71,8 @@ const bookingController = {
       customerPhoneNumber,
       customerName,
       smsConsent,
-      isRewardWash
+      isRewardWash,
+      loyaltyPointsRedeemed
     } = req.body;
 
     if (!req.user) {
@@ -52,7 +80,7 @@ const bookingController = {
     }
 
     // Validate required fields
-    if (!attendant || !amount || !category || !paymentType) {
+    if (!attendant || amount === undefined || amount === null || !category || !paymentType) {
       return next(new AppError('Required fields: attendant, amount, category, paymentType', 400));
     }
 
@@ -95,8 +123,14 @@ const bookingController = {
       return next(new AppError('Payment type must be either "attendant_cash", "admin_cash", or "admin_till"', 400));
     }
 
+    const redemptionPointsRequested = Math.max(0, Number(loyaltyPointsRedeemed || 0));
+    const rewardWashRequested = Boolean(isRewardWash) || redemptionPointsRequested > 0;
+
     // Validate amount
-    if (amount <= 0) {
+    if (amount < 0) {
+      return next(new AppError('Amount cannot be negative', 400));
+    }
+    if (amount === 0 && !rewardWashRequested) {
       return next(new AppError('Amount must be greater than 0', 400));
     }
 
@@ -125,6 +159,11 @@ const bookingController = {
       return next(new AppError('Attendant does not belong to the authenticated business', 403));
     }
 
+    const loyaltyRedemption = await resolveLoyaltyRedemptionFields(
+      bookingBusinessId,
+      redemptionPointsRequested
+    );
+
     // Create booking data based on category
     const bookingData: any = {
       attendant,
@@ -133,7 +172,17 @@ const bookingController = {
       category,
       paymentType,
       ...(typeof smsConsent === 'boolean' && category !== 'carpet' ? { smsConsent } : {}),
-      ...(typeof isRewardWash === 'boolean' ? { isRewardWash } : {})
+      ...(rewardWashRequested || loyaltyRedemption.isRewardWash
+        ? { isRewardWash: true }
+        : typeof isRewardWash === 'boolean'
+          ? { isRewardWash }
+          : {}),
+      ...(loyaltyRedemption.loyaltyPointsRedeemed > 0
+        ? {
+            loyaltyPointsRedeemed: loyaltyRedemption.loyaltyPointsRedeemed,
+            loyaltyDiscountKes: loyaltyRedemption.loyaltyDiscountKes
+          }
+        : {})
     };
 
     if (category === 'vehicle') {
@@ -179,17 +228,17 @@ const bookingController = {
 
         const legacyPlate = customer['vehiclePlate'];
         bookingData.carRegistrationNumber = legacyPlate
-          ? String(legacyPlate).toUpperCase().trim()
-          : String(carRegistrationNumber).toUpperCase().trim();
+          ? normalizePlate(String(legacyPlate))
+          : normalizePlate(String(carRegistrationNumber));
 
         if (!bookingData.carRegistrationNumber) {
           return next(new AppError('carRegistrationNumber is required when the customer has no legacy plate', 400));
         }
       } else {
-        bookingData.carRegistrationNumber = String(carRegistrationNumber).toUpperCase().trim();
+        bookingData.carRegistrationNumber = normalizePlate(String(carRegistrationNumber));
 
         if (typeof customerPhoneNumber === 'string' && customerPhoneNumber.trim()) {
-          bookingData.customerPhoneNumber = customerPhoneNumber.trim();
+          bookingData.customerPhoneNumber = normalizePhoneForStorage(customerPhoneNumber);
         }
         if (typeof customerName === 'string' && customerName.trim()) {
           bookingData.customerName = customerName.trim();
@@ -199,8 +248,30 @@ const bookingController = {
       if (typeof smsConsent === 'boolean') {
         bookingData.smsConsent = smsConsent;
       }
+
+      if (
+        !bookingData.vehicle &&
+        bookingData.carRegistrationNumber &&
+        bookingData.customerPhoneNumber
+      ) {
+        const registered = await ensureVehicleCustomerRegistration({
+          businessId: bookingBusinessId,
+          plate: String(bookingData.carRegistrationNumber),
+          phoneNumber: String(bookingData.customerPhoneNumber),
+          ...(bookingData.customerName ? { customerName: String(bookingData.customerName) } : {}),
+          ...(bookingData.vehicleType ? { vehicleType: String(bookingData.vehicleType) } : {}),
+          ...(typeof bookingData.smsConsent === 'boolean' ? { smsConsent: bookingData.smsConsent } : {})
+        });
+
+        bookingData.vehicle = registered.vehicleId;
+        bookingData.customer = registered.customerId;
+        bookingData.carRegistrationNumber = registered.plate;
+        bookingData.customerName = registered.customerName;
+        bookingData.customerPhoneNumber = registered.customerPhoneNumber;
+        bookingData.smsConsent = registered.smsConsent;
+      }
     } else if (category === 'carpet') {
-      bookingData.phoneNumber = phoneNumber.trim();
+      bookingData.phoneNumber = normalizePhoneForStorage(phoneNumber);
       bookingData.color = color.trim();
 
       const trimmedCarpetCustomerId =
@@ -215,6 +286,16 @@ const bookingController = {
         bookingData.customer = linkedCustomer._id;
         bookingData.customerName = linkedCustomer['name'];
         bookingData.customerPhoneNumber = linkedCustomer['phoneNumber'];
+      } else if (bookingData.phoneNumber) {
+        const registered = await ensureCustomerRegistration({
+          businessId: bookingBusinessId,
+          phoneNumber: String(bookingData.phoneNumber),
+          ...(bookingData.customerName ? { customerName: String(bookingData.customerName) } : {})
+        });
+
+        bookingData.customer = registered.customerId;
+        bookingData.customerName = registered.customerName;
+        bookingData.customerPhoneNumber = registered.customerPhoneNumber;
       }
     }
 
@@ -327,10 +408,9 @@ const bookingController = {
       customerPhoneNumber,
       customerName,
       smsConsent,
-      isRewardWash
+      isRewardWash,
+      loyaltyPointsRedeemed
     } = req.body;
-
-    // Validate category if provided
     if (category && !['vehicle', 'carpet'].includes(category)) {
       return next(new AppError('Category must be either "vehicle" or "carpet"', 400));
     }
@@ -351,7 +431,12 @@ const bookingController = {
     }
 
     // Validate amount if provided
-    if (amount && amount <= 0) {
+    const updateRedemptionPoints = Math.max(0, Number(loyaltyPointsRedeemed || 0));
+    const updateRewardWashRequested = Boolean(isRewardWash) || updateRedemptionPoints > 0;
+    if (amount !== undefined && amount < 0) {
+      return next(new AppError('Amount cannot be negative', 400));
+    }
+    if (amount === 0 && !updateRewardWashRequested) {
       return next(new AppError('Amount must be greater than 0', 400));
     }
 
@@ -361,6 +446,13 @@ const bookingController = {
 
     if (isRewardWash !== undefined && typeof isRewardWash !== 'boolean') {
       return next(new AppError('isRewardWash must be a boolean', 400));
+    }
+
+    if (
+      loyaltyPointsRedeemed !== undefined &&
+      (!Number.isFinite(Number(loyaltyPointsRedeemed)) || Number(loyaltyPointsRedeemed) < 0)
+    ) {
+      return next(new AppError('loyaltyPointsRedeemed must be a non-negative number', 400));
     }
 
     let resolvedCustomerName: string | undefined;
@@ -513,16 +605,22 @@ const bookingController = {
       // Don't fail the booking update if wallet update fails, but log the error
     }
 
+    const businessIdForLoyalty = req.user?.business ? req.user.business.toString() : originalBooking.business.toString();
+    const loyaltyRedemptionPatch =
+      loyaltyPointsRedeemed !== undefined
+        ? await resolveLoyaltyRedemptionFields(businessIdForLoyalty, updateRedemptionPoints)
+        : null;
+
     const booking = await attachBookingPopulates(
       Booking.findByIdAndUpdate(
         req.params['id'],
         {
           ...(statusChangedFromCompleted ? { loyaltyProcessed: false } : {}),
-          ...(carRegistrationNumber && { carRegistrationNumber: carRegistrationNumber.toUpperCase().trim() }),
-          ...(phoneNumber && { phoneNumber: phoneNumber.trim() }),
+          ...(carRegistrationNumber && { carRegistrationNumber: normalizePlate(String(carRegistrationNumber)) }),
+          ...(phoneNumber && { phoneNumber: normalizePhoneForStorage(phoneNumber) }),
           ...(color && { color: color.trim() }),
           ...(attendant && { attendant }),
-          ...(amount && { amount }),
+          ...(amount !== undefined && { amount }),
           ...(serviceType && { serviceType }),
           ...(vehicleType && { vehicleType: vehicleType.trim() }),
           ...(category && { category }),
@@ -551,6 +649,13 @@ const bookingController = {
               smsConsent: resolvedCustomerConsent
             }),
           ...(isRewardWash !== undefined && { isRewardWash }),
+          ...(loyaltyRedemptionPatch
+            ? {
+                loyaltyPointsRedeemed: loyaltyRedemptionPatch.loyaltyPointsRedeemed,
+                loyaltyDiscountKes: loyaltyRedemptionPatch.loyaltyDiscountKes,
+                ...(loyaltyRedemptionPatch.isRewardWash ? { isRewardWash: true } : {})
+              }
+            : {}),
           ...(Object.keys(vehiclePatch).length > 0 ? vehiclePatch : {}),
           ...(smsConsent !== undefined && categoryAfterPatch !== 'carpet' && { smsConsent })
         },

@@ -61,6 +61,11 @@ router.patch(
   loyaltyController.updateCustomerConsent
 );
 router.get(
+  '/profile',
+  authController.restrictTo('business_admin', 'admin', 'system_admin'),
+  loyaltyController.getCustomerLoyaltyProfile
+);
+router.get(
   '/report',
   authController.restrictTo('business_admin', 'admin', 'system_admin'),
   loyaltyController.getBusinessLoyaltyReport

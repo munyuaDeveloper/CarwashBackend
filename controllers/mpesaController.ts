@@ -116,28 +116,62 @@ const parseMpesaSettingsInput = (body: Record<string, unknown>): MpesaSettingsIn
   return input;
 };
 
-const mapTransactionForResponse = (transaction: Record<string, unknown>) => ({
-  _id: transaction['_id'],
-  business: transaction['business'],
-  booking: transaction['booking'],
-  amount: transaction['amount'],
-  phoneNumber: transaction['phoneNumber'],
-  accountReference: transaction['accountReference'],
-  transactionDesc: transaction['transactionDesc'],
-  merchantRequestId: transaction['merchantRequestId'],
-  checkoutRequestId: transaction['checkoutRequestId'],
-  status: transaction['status'],
-  resultCode: transaction['resultCode'],
-  resultDesc: transaction['resultDesc'],
-  mpesaReceiptNumber: transaction['mpesaReceiptNumber'],
-  initiatedBy: transaction['initiatedBy'],
-  responseCode: transaction['responseCode'],
-  responseDescription: transaction['responseDescription'],
-  customerMessage: transaction['customerMessage'],
-  completedAt: transaction['completedAt'],
-  createdAt: transaction['createdAt'],
-  updatedAt: transaction['updatedAt']
-});
+const mapTransactionForResponse = (transaction: Record<string, unknown>) => {
+  const booking = transaction['booking'];
+  const initiatedBy = transaction['initiatedBy'];
+  const business = transaction['business'];
+
+  const bookingSummary =
+    booking && typeof booking === 'object' && booking !== null && '_id' in booking
+      ? {
+          _id: (booking as { _id: unknown })._id,
+          carRegistrationNumber: (booking as { carRegistrationNumber?: string }).carRegistrationNumber,
+          amount: (booking as { amount?: number }).amount,
+          status: (booking as { status?: string }).status,
+          paymentType: (booking as { paymentType?: string }).paymentType
+        }
+      : booking ?? null;
+
+  const businessSummary =
+    business && typeof business === 'object' && business !== null && '_id' in business
+      ? {
+          _id: (business as { _id: unknown })._id,
+          name: (business as { name?: string }).name
+        }
+      : business ?? null;
+
+  const initiatedBySummary =
+    initiatedBy && typeof initiatedBy === 'object' && initiatedBy !== null && '_id' in initiatedBy
+      ? {
+          _id: (initiatedBy as { _id: unknown })._id,
+          name: (initiatedBy as { name?: string }).name,
+          email: (initiatedBy as { email?: string }).email
+        }
+      : initiatedBy ?? null;
+
+  return {
+    _id: transaction['_id'],
+    business: businessSummary,
+    booking: bookingSummary,
+    amount: transaction['amount'],
+    phoneNumber: transaction['phoneNumber'],
+    accountReference: transaction['accountReference'],
+    transactionDesc: transaction['transactionDesc'],
+    merchantRequestId: transaction['merchantRequestId'],
+    checkoutRequestId: transaction['checkoutRequestId'],
+    status: transaction['status'],
+    resultCode: transaction['resultCode'],
+    resultDesc: transaction['resultDesc'],
+    mpesaReceiptNumber: transaction['mpesaReceiptNumber'],
+    initiatedBy: initiatedBySummary,
+    responseCode: transaction['responseCode'],
+    responseDescription: transaction['responseDescription'],
+    customerMessage: transaction['customerMessage'],
+    completedAt: transaction['completedAt'],
+    createdAt: transaction['createdAt'],
+    updatedAt: transaction['updatedAt']
+  };
+};
 
 const mpesaController = {
   getMpesaConfig: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
@@ -527,32 +561,60 @@ const mpesaController = {
 
   listTransactions: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
     const businessId = getBusinessContext(req);
-    if (!businessId) {
+    const baseFilter: Record<string, unknown> = {};
+
+    if (businessId) {
+      baseFilter['business'] = businessId;
+    }
+    if (!userHasAnyRole(req.user, ['system_admin', 'admin']) && !businessId) {
       return next(new AppError('Business context is required', 400));
     }
-    if (!assertBusinessAccess(req, businessId, next)) return;
 
-    const filter: Record<string, unknown> = { business: businessId };
     if (typeof req.query['bookingId'] === 'string' && req.query['bookingId'].trim()) {
       if (!mongoose.Types.ObjectId.isValid(req.query['bookingId'])) {
         return next(new AppError('Invalid bookingId', 400));
       }
-      filter['booking'] = req.query['bookingId'];
-    }
-    if (typeof req.query['status'] === 'string' && req.query['status'].trim()) {
-      filter['status'] = req.query['status'];
+      baseFilter['booking'] = req.query['bookingId'];
     }
 
-    const limit = Math.min(Number(req.query['limit'] ?? 20), 100);
-    const transactions = await MpesaTransaction.find(filter)
+    const statusRaw = typeof req.query['status'] === 'string' ? req.query['status'].trim() : '';
+    const allowedStatuses = new Set(['pending', 'success', 'failed', 'cancelled', 'timeout']);
+    if (statusRaw && statusRaw !== 'all' && allowedStatuses.has(statusRaw)) {
+      baseFilter['status'] = statusRaw;
+    }
+
+    const searchRaw = typeof req.query['search'] === 'string' ? req.query['search'].trim() : '';
+    if (searchRaw) {
+      const escaped = searchRaw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escaped, 'i');
+      baseFilter['$or'] = [
+        { phoneNumber: { $regex: searchRegex } },
+        { mpesaReceiptNumber: { $regex: searchRegex } },
+        { accountReference: { $regex: searchRegex } },
+        { checkoutRequestId: { $regex: searchRegex } },
+        { resultDesc: { $regex: searchRegex } }
+      ];
+    }
+
+    const page = Math.max(1, Number(req.query['page'] ?? 1) || 1);
+    const limit = Math.min(Math.max(1, Number(req.query['limit'] ?? 20) || 20), 100);
+    const skip = (page - 1) * limit;
+
+    const total = await MpesaTransaction.countDocuments(baseFilter);
+    const transactions = await MpesaTransaction.find(baseFilter)
       .sort({ createdAt: -1 })
+      .skip(skip)
       .limit(limit)
       .populate('initiatedBy', 'name email')
+      .populate('business', 'name')
       .populate('booking', 'carRegistrationNumber amount status paymentType');
 
     res.status(200).json({
       status: 'success',
       results: transactions.length,
+      total,
+      page,
+      limit,
       data: {
         transactions: transactions.map((item) => mapTransactionForResponse(item.toObject()))
       }

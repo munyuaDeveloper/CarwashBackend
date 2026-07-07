@@ -40,15 +40,39 @@ const businessSchema = new mongoose.Schema(
         type: Boolean,
         default: false
       },
-      washesRequired: {
+      pointsPerHundredKes: {
         type: Number,
-        default: 5,
+        default: 10,
+        min: 0.01
+      },
+      redemptionPoints: {
+        type: Number,
+        default: 500,
+        min: 1
+      },
+      redemptionValueKes: {
+        type: Number,
+        default: 500,
         min: 1
       },
       rewardType: {
         type: String,
-        default: '1 free wash',
+        default: 'KSh 500 discount',
         trim: true
+      },
+      earnOnNonOwnedVehicles: {
+        type: Boolean,
+        default: true
+      },
+      maxPointsEarnedPerDay: {
+        type: Number,
+        default: null,
+        min: 0
+      },
+      maxRedeemableValuePerMonth: {
+        type: Number,
+        default: null,
+        min: 0
       },
       smsEnabled: {
         type: Boolean,

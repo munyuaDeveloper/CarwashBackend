@@ -5,8 +5,8 @@ import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
 import Vehicle from '../models/vehicleModel';
 import Customer from '../models/customerModel';
-
-const normalizePlate = (plate: string): string => plate.trim().toUpperCase();
+import { normalizePlate } from '../utils/contactNormalization';
+import { findCustomerByPhone, findVehicleByPlate, resolveOrCreateCustomer } from '../utils/contactLookup';
 
 const pickFirstQueryString = (value: unknown): string | undefined => {
   if (value === undefined || value === null) {
@@ -31,7 +31,24 @@ const vehicleController = {
     };
 
     const customerIdRaw = pickFirstQueryString(req.query['customerId']);
-    if (customerIdRaw !== undefined && customerIdRaw.trim() !== '') {
+    const phoneRaw = pickFirstQueryString(req.query['phone']);
+
+    if (phoneRaw !== undefined && phoneRaw.trim() !== '') {
+      const linkedCustomer = await findCustomerByPhone(businessId, phoneRaw.trim());
+      if (!linkedCustomer) {
+        const emptyLimit = Math.min(200, Math.max(1, Number(req.query['limit'] ?? 100) || 100));
+        res.status(200).json({
+          status: 'success',
+          results: 0,
+          total: 0,
+          page: 1,
+          limit: emptyLimit,
+          data: { vehicles: [] }
+        });
+        return;
+      }
+      filter['customer'] = linkedCustomer._id;
+    } else if (customerIdRaw !== undefined && customerIdRaw.trim() !== '') {
       if (!/^[0-9a-fA-F]{24}$/.test(customerIdRaw.trim())) {
         return next(new AppError('Invalid customerId query parameter', 400));
       }
@@ -45,7 +62,8 @@ const vehicleController = {
 
     const searchRaw = pickFirstQueryString(req.query['search']);
     if (searchRaw !== undefined && searchRaw.trim().length > 0) {
-      const escaped = searchRaw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const normalizedSearch = normalizePlate(searchRaw);
+      const escaped = normalizedSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter['plate'] = { $regex: escaped, $options: 'i' };
     }
 
@@ -155,14 +173,35 @@ const vehicleController = {
 
     const normalizedPlate = normalizePlate(plate);
 
+    const existingVehicle = await findVehicleByPlate(businessId, normalizedPlate);
+    if (existingVehicle) {
+      return next(new AppError('A vehicle with this plate already exists for your business', 409));
+    }
+
     try {
-      const customer = await Customer.create({
-        business: businessId,
-        name: customerPayload.name.trim(),
+      const customer = await resolveOrCreateCustomer({
+        businessId,
         phoneNumber: customerPayload.phoneNumber.trim(),
-        ...(typeof customerPayload.smsConsent === 'boolean' ? { smsConsent: customerPayload.smsConsent } : {}),
-        ...(typeof customerPayload.active === 'boolean' ? { active: customerPayload.active } : {})
+        customerName: customerPayload.name.trim(),
+        ...(typeof customerPayload.smsConsent === 'boolean' ? { smsConsent: customerPayload.smsConsent } : {})
       });
+
+      let customerDirty = false;
+      if (customerPayload.name?.trim() && customer['name'] !== customerPayload.name.trim()) {
+        customer.set('name', customerPayload.name.trim());
+        customerDirty = true;
+      }
+      if (
+        typeof customerPayload.smsConsent === 'boolean' &&
+        customerPayload.smsConsent &&
+        !customer['smsConsent']
+      ) {
+        customer.set('smsConsent', true);
+        customerDirty = true;
+      }
+      if (customerDirty) {
+        await customer.save();
+      }
 
       const vehicle = await Vehicle.create({
         business: businessId,

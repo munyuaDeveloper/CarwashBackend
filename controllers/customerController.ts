@@ -5,6 +5,7 @@ import AppError from '../utils/appError';
 import Customer from '../models/customerModel';
 import Vehicle from '../models/vehicleModel';
 import APIFeatures from '../utils/apiFeatures';
+import { normalizePhoneForStorage } from '../utils/contactNormalization';
 
 const customerController = {
   createCustomer: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
@@ -24,18 +25,32 @@ const customerController = {
       return next(new AppError('name and phoneNumber are required', 400));
     }
 
-    const customer = await Customer.create({
-      business: businessId,
-      name: name.trim(),
-      phoneNumber: phoneNumber.trim(),
-      ...(typeof smsConsent === 'boolean' ? { smsConsent } : {}),
-      ...(typeof active === 'boolean' ? { active } : {})
-    });
+    const normalizedPhone = normalizePhoneForStorage(phoneNumber);
 
-    res.status(201).json({
-      status: 'success',
-      data: { customer }
-    });
+    try {
+      const customer = await Customer.create({
+        business: businessId,
+        name: name.trim(),
+        phoneNumber: normalizedPhone,
+        ...(typeof smsConsent === 'boolean' ? { smsConsent } : {}),
+        ...(typeof active === 'boolean' ? { active } : {})
+      });
+
+      res.status(201).json({
+        status: 'success',
+        data: { customer }
+      });
+    } catch (createError: unknown) {
+      if (
+        createError &&
+        typeof createError === 'object' &&
+        'code' in createError &&
+        (createError as { code?: number }).code === 11000
+      ) {
+        return next(new AppError('A customer with this phone number already exists for your business', 409));
+      }
+      throw createError;
+    }
   }),
 
   getAllCustomers: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
@@ -105,22 +120,34 @@ const customerController = {
       active?: boolean;
     };
 
-    const updated = await Customer.findByIdAndUpdate(
-      req.params['id'],
-      {
-        ...(name !== undefined ? { name: name.trim() } : {}),
-        ...(phoneNumber !== undefined ? { phoneNumber: phoneNumber.trim() } : {}),
-        ...(vehiclePlate !== undefined ? { vehiclePlate: vehiclePlate.trim().toUpperCase() } : {}),
-        ...(typeof smsConsent === 'boolean' ? { smsConsent } : {}),
-        ...(typeof active === 'boolean' ? { active } : {})
-      },
-      { new: true, runValidators: true }
-    );
+    try {
+      const updated = await Customer.findByIdAndUpdate(
+        req.params['id'],
+        {
+          ...(name !== undefined ? { name: name.trim() } : {}),
+          ...(phoneNumber !== undefined ? { phoneNumber: phoneNumber.trim() } : {}),
+          ...(vehiclePlate !== undefined ? { vehiclePlate: vehiclePlate.trim().toUpperCase().replace(/\s+/g, '') } : {}),
+          ...(typeof smsConsent === 'boolean' ? { smsConsent } : {}),
+          ...(typeof active === 'boolean' ? { active } : {})
+        },
+        { new: true, runValidators: true }
+      );
 
-    res.status(200).json({
-      status: 'success',
-      data: { customer: updated }
-    });
+      res.status(200).json({
+        status: 'success',
+        data: { customer: updated }
+      });
+    } catch (updateError: unknown) {
+      if (
+        updateError &&
+        typeof updateError === 'object' &&
+        'code' in updateError &&
+        (updateError as { code?: number }).code === 11000
+      ) {
+        return next(new AppError('A customer with this phone number already exists for your business', 409));
+      }
+      throw updateError;
+    }
   }),
 
   deleteCustomer: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {

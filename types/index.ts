@@ -96,6 +96,9 @@ export interface IBooking extends Document {
   note?: string;
   smsConsent?: boolean;
   isRewardWash?: boolean;
+  loyaltyPointsEarned?: number;
+  loyaltyPointsRedeemed?: number;
+  loyaltyDiscountKes?: number;
   loyaltyProcessed?: boolean;
   createdAt: Date;
   updatedAt: Date;

@@ -8,6 +8,13 @@ import Business from '../models/businessModel';
 import SmsTemplate from '../models/smsTemplateModel';
 import LoyaltyProfile from '../models/loyaltyProfileModel';
 import SmsLog from '../models/smsLogModel';
+import {
+  calculateMaxRedeemableForService,
+  calculatePointsNeededForAmount,
+  canRedeemFullService,
+  getLoyaltyProfileByPhone
+} from '../utils/loyaltyService';
+import { normalizePhoneForStorage } from '../utils/contactNormalization';
 import { userHasAnyRole, userHasRole } from '../utils/userRoles';
 
 const TEMPLATE_TYPES = ['loyalty_progress', 'reward_achievement'];
@@ -45,28 +52,86 @@ const loyaltyController = {
 
     const {
       enabled,
-      washesRequired,
+      pointsPerHundredKes,
+      redemptionPoints,
+      redemptionValueKes,
       rewardType,
+      earnOnNonOwnedVehicles,
+      maxPointsEarnedPerDay,
+      maxRedeemableValuePerMonth,
       smsEnabled,
       allowRewardWashToAccrue
     } = req.body as {
       enabled?: boolean;
-      washesRequired?: number;
+      pointsPerHundredKes?: number;
+      redemptionPoints?: number;
+      redemptionValueKes?: number;
       rewardType?: string;
+      earnOnNonOwnedVehicles?: boolean;
+      maxPointsEarnedPerDay?: number | null;
+      maxRedeemableValuePerMonth?: number | null;
       smsEnabled?: boolean;
       allowRewardWashToAccrue?: boolean;
     };
 
-    if (washesRequired !== undefined && (!Number.isFinite(washesRequired) || washesRequired < 1)) {
-      return next(new AppError('washesRequired must be a positive number', 400));
+    if (
+      pointsPerHundredKes !== undefined &&
+      (!Number.isFinite(pointsPerHundredKes) || pointsPerHundredKes <= 0)
+    ) {
+      return next(new AppError('pointsPerHundredKes must be a positive number', 400));
+    }
+    if (
+      redemptionPoints !== undefined &&
+      (!Number.isFinite(redemptionPoints) || redemptionPoints < 1)
+    ) {
+      return next(new AppError('redemptionPoints must be at least 1', 400));
+    }
+    if (
+      redemptionValueKes !== undefined &&
+      (!Number.isFinite(redemptionValueKes) || redemptionValueKes < 1)
+    ) {
+      return next(new AppError('redemptionValueKes must be at least 1', 400));
+    }
+    if (
+      maxPointsEarnedPerDay !== undefined &&
+      maxPointsEarnedPerDay !== null &&
+      (!Number.isFinite(maxPointsEarnedPerDay) || maxPointsEarnedPerDay < 0)
+    ) {
+      return next(new AppError('maxPointsEarnedPerDay must be null or a non-negative number', 400));
+    }
+    if (
+      maxRedeemableValuePerMonth !== undefined &&
+      maxRedeemableValuePerMonth !== null &&
+      (!Number.isFinite(maxRedeemableValuePerMonth) || maxRedeemableValuePerMonth < 0)
+    ) {
+      return next(
+        new AppError('maxRedeemableValuePerMonth must be null or a non-negative number', 400)
+      );
     }
 
     const business = await Business.findByIdAndUpdate(
       businessId,
       {
         ...(enabled !== undefined ? { 'loyaltySettings.enabled': enabled } : {}),
-        ...(washesRequired !== undefined ? { 'loyaltySettings.washesRequired': washesRequired } : {}),
+        ...(pointsPerHundredKes !== undefined
+          ? { 'loyaltySettings.pointsPerHundredKes': pointsPerHundredKes }
+          : {}),
+        ...(redemptionPoints !== undefined
+          ? { 'loyaltySettings.redemptionPoints': redemptionPoints }
+          : {}),
+        ...(redemptionValueKes !== undefined
+          ? { 'loyaltySettings.redemptionValueKes': redemptionValueKes }
+          : {}),
         ...(rewardType !== undefined ? { 'loyaltySettings.rewardType': String(rewardType).trim() } : {}),
+        ...(earnOnNonOwnedVehicles !== undefined
+          ? { 'loyaltySettings.earnOnNonOwnedVehicles': earnOnNonOwnedVehicles }
+          : {}),
+        ...(maxPointsEarnedPerDay !== undefined
+          ? { 'loyaltySettings.maxPointsEarnedPerDay': maxPointsEarnedPerDay }
+          : {}),
+        ...(maxRedeemableValuePerMonth !== undefined
+          ? { 'loyaltySettings.maxRedeemableValuePerMonth': maxRedeemableValuePerMonth }
+          : {}),
         ...(smsEnabled !== undefined ? { 'loyaltySettings.smsEnabled': smsEnabled } : {}),
         ...(allowRewardWashToAccrue !== undefined
           ? { 'loyaltySettings.allowRewardWashToAccrue': allowRewardWashToAccrue }
@@ -203,28 +268,32 @@ const loyaltyController = {
     if (!businessId) {
       return next(new AppError('Business context is required', 400));
     }
-    const { vehicleIdentifier, smsConsent, customerPhoneNumber } = req.body as {
-      vehicleIdentifier?: string;
-      smsConsent?: boolean;
+    const { customerPhoneNumber, smsConsent, customerName } = req.body as {
       customerPhoneNumber?: string;
+      smsConsent?: boolean;
+      customerName?: string;
     };
-    if (!vehicleIdentifier || typeof vehicleIdentifier !== 'string' || !vehicleIdentifier.trim()) {
-      return next(new AppError('vehicleIdentifier is required', 400));
+    if (
+      !customerPhoneNumber ||
+      typeof customerPhoneNumber !== 'string' ||
+      !customerPhoneNumber.trim()
+    ) {
+      return next(new AppError('customerPhoneNumber is required', 400));
     }
     if (typeof smsConsent !== 'boolean') {
       return next(new AppError('smsConsent must be a boolean', 400));
     }
-    const normalizedVehicleIdentifier = vehicleIdentifier.toUpperCase().trim();
+    const normalizedPhone = normalizePhoneForStorage(customerPhoneNumber);
     const profile = await LoyaltyProfile.findOneAndUpdate(
-      { business: businessId, vehicleIdentifier: normalizedVehicleIdentifier },
+      { business: businessId, customerPhoneNumber: normalizedPhone },
       {
         $set: {
           smsConsent,
-          ...(customerPhoneNumber ? { customerPhoneNumber: customerPhoneNumber.trim() } : {})
+          ...(customerName ? { customerName: customerName.trim() } : {})
         },
         $setOnInsert: {
           business: businessId,
-          vehicleIdentifier: normalizedVehicleIdentifier
+          customerPhoneNumber: normalizedPhone
         }
       },
       { upsert: true, new: true }
@@ -247,9 +316,9 @@ const loyaltyController = {
       {
         $group: {
           _id: null,
-          totalRewardsEarned: { $sum: '$totalRewardsEarned' },
-          totalRewardsRedeemed: { $sum: '$totalRewardsRedeemed' },
-          pendingRewards: { $sum: '$pendingRewards' }
+          totalPointsEarned: { $sum: '$totalPointsEarned' },
+          totalPointsRedeemed: { $sum: '$totalPointsRedeemed' },
+          pointsBalance: { $sum: '$pointsBalance' }
         }
       }
     ]);
@@ -267,9 +336,9 @@ const loyaltyController = {
       status: 'success',
       data: {
         totalMembers,
-        totalRewardsEarned: profileStats[0]?.['totalRewardsEarned'] || 0,
-        totalRewardsRedeemed: profileStats[0]?.['totalRewardsRedeemed'] || 0,
-        pendingRewards: profileStats[0]?.['pendingRewards'] || 0,
+        totalPointsEarned: profileStats[0]?.['totalPointsEarned'] || 0,
+        totalPointsRedeemed: profileStats[0]?.['totalPointsRedeemed'] || 0,
+        pointsBalance: profileStats[0]?.['pointsBalance'] || 0,
         smsDeliveryStats: smsStats
       }
     });
@@ -329,6 +398,70 @@ const loyaltyController = {
       page,
       limit,
       data: { logs }
+    });
+  }),
+
+  getCustomerLoyaltyProfile: catchAsync(async (req: IRequestWithUser, res: Response, next: NextFunction) => {
+    const businessId = getBusinessContext(req);
+    if (!businessId) {
+      return next(new AppError('Business context is required', 400));
+    }
+    const phone = typeof req.query['phone'] === 'string' ? req.query['phone'].trim() : '';
+    if (!phone) {
+      return next(new AppError('phone query parameter is required', 400));
+    }
+
+    const profile = await getLoyaltyProfileByPhone(businessId, phone);
+    const business = await Business.findById(businessId).select('loyaltySettings');
+    const loyaltySettings = business?.['loyaltySettings'];
+    const redemptionPoints = Math.max(1, Number(loyaltySettings?.redemptionPoints ?? 500));
+    const redemptionValueKes = Math.max(1, Number(loyaltySettings?.redemptionValueKes ?? 500));
+    const parsedAmount = Number(req.query['amount']);
+    const serviceAmount =
+      Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : null;
+    const pointsBalance = profile ? Number(profile['pointsBalance'] || 0) : 0;
+
+    const redemption =
+      serviceAmount !== null
+        ? {
+            serviceAmountKes: serviceAmount,
+            pointsNeededForService: calculatePointsNeededForAmount(
+              serviceAmount,
+              redemptionPoints,
+              redemptionValueKes
+            ),
+            maxRedeemablePoints: calculateMaxRedeemableForService(
+              pointsBalance,
+              serviceAmount,
+              redemptionPoints,
+              redemptionValueKes
+            ),
+            canRedeemFullService: canRedeemFullService(
+              pointsBalance,
+              serviceAmount,
+              redemptionPoints,
+              redemptionValueKes
+            ),
+            discountKesPerPoint: redemptionValueKes / redemptionPoints
+          }
+        : null;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        profile: profile
+          ? {
+              customerPhoneNumber: profile['customerPhoneNumber'],
+              customerName: profile['customerName'],
+              pointsBalance,
+              totalPointsEarned: profile['totalPointsEarned'] || 0,
+              totalPointsRedeemed: profile['totalPointsRedeemed'] || 0,
+              smsConsent: Boolean(profile['smsConsent'])
+            }
+          : null,
+        loyaltySettings: loyaltySettings ?? null,
+        redemption
+      }
     });
   }),
 

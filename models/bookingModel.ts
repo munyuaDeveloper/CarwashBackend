@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { IBooking } from '../types';
+import { normalizePhoneForStorage, normalizePlate } from '../utils/contactNormalization';
 
 const bookingSchema = new mongoose.Schema({
   carRegistrationNumber: {
@@ -32,6 +33,21 @@ const bookingSchema = new mongoose.Schema({
   isRewardWash: {
     type: Boolean,
     default: false
+  },
+  loyaltyPointsEarned: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  loyaltyPointsRedeemed: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  loyaltyDiscountKes: {
+    type: Number,
+    default: 0,
+    min: 0
   },
   color: {
     type: String,
@@ -127,9 +143,26 @@ bookingSchema.index({ attendant: 1 });
 bookingSchema.index({ business: 1 });
 bookingSchema.index({ createdAt: -1 });
 
-// Pre-save middleware to update updatedAt
+// Pre-save middleware to update updatedAt and normalize contact fields
 bookingSchema.pre('save', function (next) {
   this.updatedAt = new Date();
+
+  if (this.isModified('carRegistrationNumber') || this.isNew) {
+    if (typeof this.carRegistrationNumber === 'string' && this.carRegistrationNumber.trim()) {
+      this.carRegistrationNumber = normalizePlate(this.carRegistrationNumber);
+    }
+  }
+  if (this.isModified('customerPhoneNumber') || this.isNew) {
+    if (typeof this.customerPhoneNumber === 'string' && this.customerPhoneNumber.trim()) {
+      this.customerPhoneNumber = normalizePhoneForStorage(this.customerPhoneNumber);
+    }
+  }
+  if (this.isModified('phoneNumber') || this.isNew) {
+    if (typeof this.phoneNumber === 'string' && this.phoneNumber.trim()) {
+      this.phoneNumber = normalizePhoneForStorage(this.phoneNumber);
+    }
+  }
+
   next();
 });
 

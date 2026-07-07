@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { normalizePhoneForStorage } from '../utils/contactNormalization';
 
 const loyaltyProfileSchema = new mongoose.Schema(
   {
@@ -7,42 +8,64 @@ const loyaltyProfileSchema = new mongoose.Schema(
       ref: 'Business',
       required: [true, 'Business is required']
     },
-    vehicleIdentifier: {
-      type: String,
-      required: [true, 'Vehicle identifier is required'],
-      trim: true,
-      uppercase: true
-    },
     customerPhoneNumber: {
       type: String,
+      required: [true, 'Customer phone number is required'],
       trim: true
+    },
+    customerName: {
+      type: String,
+      trim: true
+    },
+    customer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Customer',
+      default: null
     },
     smsConsent: {
       type: Boolean,
       default: false
     },
-    totalCompletedPaidWashes: {
+    pointsBalance: {
       type: Number,
       default: 0,
       min: 0
     },
-    pendingRewards: {
+    totalPointsEarned: {
       type: Number,
       default: 0,
       min: 0
     },
-    totalRewardsEarned: {
+    totalPointsRedeemed: {
       type: Number,
       default: 0,
       min: 0
     },
-    totalRewardsRedeemed: {
+    pointsEarnedToday: {
       type: Number,
       default: 0,
       min: 0
     },
-    lastRewardEarnedAt: Date,
-    lastRewardRedeemedAt: Date,
+    pointsEarnedTodayDate: {
+      type: String,
+      trim: true
+    },
+    redeemValueThisMonth: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    redeemValueMonthKey: {
+      type: String,
+      trim: true
+    },
+    lastVehicleIdentifier: {
+      type: String,
+      trim: true,
+      uppercase: true
+    },
+    lastPointsEarnedAt: Date,
+    lastRedeemedAt: Date,
     lastCompletedBooking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Booking'
@@ -53,8 +76,16 @@ const loyaltyProfileSchema = new mongoose.Schema(
   }
 );
 
-loyaltyProfileSchema.index({ business: 1, vehicleIdentifier: 1 }, { unique: true });
-loyaltyProfileSchema.index({ business: 1, customerPhoneNumber: 1 });
+loyaltyProfileSchema.index({ business: 1, customerPhoneNumber: 1 }, { unique: true });
+
+loyaltyProfileSchema.pre('save', function loyaltyProfilePreSave(next) {
+  if (this.isModified('customerPhoneNumber') || this.isNew) {
+    if (typeof this.customerPhoneNumber === 'string' && this.customerPhoneNumber.trim()) {
+      this.customerPhoneNumber = normalizePhoneForStorage(this.customerPhoneNumber);
+    }
+  }
+  next();
+});
 
 const LoyaltyProfile = mongoose.model('LoyaltyProfile', loyaltyProfileSchema);
 

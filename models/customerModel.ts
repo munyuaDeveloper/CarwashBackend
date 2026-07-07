@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { normalizePhoneForStorage } from '../utils/contactNormalization';
 
 const customerSchema = new mongoose.Schema(
   {
@@ -37,7 +38,46 @@ const customerSchema = new mongoose.Schema(
   }
 );
 
-customerSchema.index({ business: 1, phoneNumber: 1 });
+customerSchema.index({ business: 1, phoneNumber: 1 }, { unique: true });
+
+const normalizeCustomerPhone = (doc: { phoneNumber?: string }) => {
+  if (typeof doc.phoneNumber === 'string' && doc.phoneNumber.trim()) {
+    doc.phoneNumber = normalizePhoneForStorage(doc.phoneNumber);
+  }
+};
+
+customerSchema.pre('save', function customerPreSave(next) {
+  if (this.isModified('phoneNumber') || this.isNew) {
+    normalizeCustomerPhone(this);
+  }
+  next();
+});
+
+customerSchema.pre('findOneAndUpdate', function customerPreUpdate(next) {
+  const update = this.getUpdate() as Record<string, unknown> | null;
+  if (!update) {
+    next();
+    return;
+  }
+
+  const apply = (value: unknown) => {
+    if (typeof value === 'string') {
+      return normalizePhoneForStorage(value);
+    }
+    return value;
+  };
+
+  if (update['$set'] && typeof update['$set'] === 'object') {
+    const set = update['$set'] as Record<string, unknown>;
+    if (set['phoneNumber'] !== undefined) {
+      set['phoneNumber'] = apply(set['phoneNumber']);
+    }
+  } else if (update['phoneNumber'] !== undefined) {
+    update['phoneNumber'] = apply(update['phoneNumber']);
+  }
+
+  next();
+});
 
 const Customer = mongoose.model('Customer', customerSchema);
 
