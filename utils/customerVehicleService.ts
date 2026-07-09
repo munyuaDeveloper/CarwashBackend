@@ -4,6 +4,7 @@ import Vehicle from '../models/vehicleModel';
 import {
   backfillNormalizedPhone,
   backfillNormalizedPlate,
+  businessMatches,
   findVehicleByPlate,
   resolveOrCreateCustomer
 } from './contactLookup';
@@ -165,5 +166,141 @@ export const ensureCustomerRegistration = async (
     customerId: customer._id,
     customerName: customer['name'],
     customerPhoneNumber: customer['phoneNumber']
+  };
+};
+
+type EnsureVehicleParams = {
+  businessId: string;
+  plate: string;
+  vehicleType?: string;
+};
+
+export type EnsureVehicleResult = {
+  vehicleId: mongoose.Types.ObjectId;
+  plate: string;
+  customerId?: mongoose.Types.ObjectId;
+  customerName?: string;
+  customerPhoneNumber?: string;
+  smsConsent?: boolean;
+};
+
+/**
+ * Find or create a vehicle by plate WITHOUT requiring a customer. Used for
+ * walk-in bookings where customer details are not captured up front. If the
+ * plate already belongs to a known customer, that link is returned so the
+ * booking can still be attributed correctly.
+ */
+export const ensureVehicleRegistration = async (
+  params: EnsureVehicleParams
+): Promise<EnsureVehicleResult> => {
+  const plate = normalizePlate(params.plate);
+  const businessOid = new mongoose.Types.ObjectId(params.businessId);
+
+  if (!plate) {
+    throw new Error('Plate is required to register a vehicle.');
+  }
+
+  let vehicle = await findVehicleByPlate(businessOid, plate);
+  if (vehicle) {
+    await backfillNormalizedPlate(vehicle);
+
+    if (params.vehicleType?.trim() && vehicle['vehicleType'] !== params.vehicleType.trim()) {
+      vehicle.set('vehicleType', params.vehicleType.trim());
+      await vehicle.save();
+    }
+
+    if (vehicle['customer']) {
+      const customer = await Customer.findById(vehicle['customer']);
+      if (customer && businessMatches(customer['business'], params.businessId)) {
+        await backfillNormalizedPhone(customer);
+        return {
+          vehicleId: vehicle._id,
+          plate,
+          customerId: customer._id,
+          customerName: customer['name'],
+          customerPhoneNumber: customer['phoneNumber'],
+          smsConsent: Boolean(customer['smsConsent'])
+        };
+      }
+    }
+
+    return { vehicleId: vehicle._id, plate };
+  }
+
+  try {
+    vehicle = await Vehicle.create({
+      business: businessOid,
+      customer: null,
+      plate,
+      ...(params.vehicleType?.trim() ? { vehicleType: params.vehicleType.trim() } : {})
+    });
+  } catch (createError: unknown) {
+    if (
+      createError &&
+      typeof createError === 'object' &&
+      'code' in createError &&
+      (createError as { code?: number }).code === 11000
+    ) {
+      vehicle = await findVehicleByPlate(businessOid, plate);
+      if (!vehicle) {
+        throw new Error('A vehicle with this plate already exists for your business.');
+      }
+    } else {
+      throw createError;
+    }
+  }
+
+  return { vehicleId: vehicle._id, plate };
+};
+
+type LinkCustomerToVehicleParams = {
+  businessId: string;
+  vehicleId?: mongoose.Types.ObjectId | string | null;
+  phoneNumber: string;
+  customerName?: string;
+  smsConsent?: boolean;
+};
+
+export type LinkCustomerToVehicleResult = {
+  customerId: mongoose.Types.ObjectId;
+  customerName: string;
+  customerPhoneNumber: string;
+  smsConsent: boolean;
+};
+
+/**
+ * Resolve (or create) a customer by phone and link them to an existing vehicle
+ * that has no customer yet. Used when an admin adds customer details to a
+ * booking after it was created as a walk-in.
+ */
+export const linkCustomerToVehicle = async (
+  params: LinkCustomerToVehicleParams
+): Promise<LinkCustomerToVehicleResult> => {
+  const customer = await resolveOrCreateCustomer({
+    businessId: params.businessId,
+    phoneNumber: params.phoneNumber,
+    ...(params.customerName ? { customerName: params.customerName } : {}),
+    ...(params.smsConsent === true ? { smsConsent: true } : {})
+  });
+
+  await applyCustomerUpdates(customer, params);
+
+  if (params.vehicleId) {
+    const vehicle = await Vehicle.findById(params.vehicleId);
+    if (
+      vehicle &&
+      businessMatches(vehicle['business'], params.businessId) &&
+      !vehicle['customer']
+    ) {
+      vehicle.set('customer', customer._id);
+      await vehicle.save();
+    }
+  }
+
+  return {
+    customerId: customer._id,
+    customerName: customer['name'],
+    customerPhoneNumber: customer['phoneNumber'],
+    smsConsent: Boolean(customer['smsConsent'])
   };
 };

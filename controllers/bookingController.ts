@@ -12,7 +12,9 @@ import Business from '../models/businessModel';
 import { calculateDiscountFromPoints, processCompletedBookingLoyalty } from '../utils/loyaltyService';
 import {
   ensureCustomerRegistration,
-  ensureVehicleCustomerRegistration
+  ensureVehicleCustomerRegistration,
+  ensureVehicleRegistration,
+  linkCustomerToVehicle
 } from '../utils/customerVehicleService';
 import { normalizePhoneForStorage, normalizePlate } from '../utils/contactNormalization';
 import { userHasRole } from '../utils/userRoles';
@@ -249,26 +251,46 @@ const bookingController = {
         bookingData.smsConsent = smsConsent;
       }
 
-      if (
-        !bookingData.vehicle &&
-        bookingData.carRegistrationNumber &&
-        bookingData.customerPhoneNumber
-      ) {
-        const registered = await ensureVehicleCustomerRegistration({
-          businessId: bookingBusinessId,
-          plate: String(bookingData.carRegistrationNumber),
-          phoneNumber: String(bookingData.customerPhoneNumber),
-          ...(bookingData.customerName ? { customerName: String(bookingData.customerName) } : {}),
-          ...(bookingData.vehicleType ? { vehicleType: String(bookingData.vehicleType) } : {}),
-          ...(typeof bookingData.smsConsent === 'boolean' ? { smsConsent: bookingData.smsConsent } : {})
-        });
+      if (!bookingData.vehicle && bookingData.carRegistrationNumber) {
+        if (bookingData.customerPhoneNumber) {
+          // Full registration: create/link both the vehicle and the customer.
+          const registered = await ensureVehicleCustomerRegistration({
+            businessId: bookingBusinessId,
+            plate: String(bookingData.carRegistrationNumber),
+            phoneNumber: String(bookingData.customerPhoneNumber),
+            ...(bookingData.customerName ? { customerName: String(bookingData.customerName) } : {}),
+            ...(bookingData.vehicleType ? { vehicleType: String(bookingData.vehicleType) } : {}),
+            ...(typeof bookingData.smsConsent === 'boolean' ? { smsConsent: bookingData.smsConsent } : {})
+          });
 
-        bookingData.vehicle = registered.vehicleId;
-        bookingData.customer = registered.customerId;
-        bookingData.carRegistrationNumber = registered.plate;
-        bookingData.customerName = registered.customerName;
-        bookingData.customerPhoneNumber = registered.customerPhoneNumber;
-        bookingData.smsConsent = registered.smsConsent;
+          bookingData.vehicle = registered.vehicleId;
+          bookingData.customer = registered.customerId;
+          bookingData.carRegistrationNumber = registered.plate;
+          bookingData.customerName = registered.customerName;
+          bookingData.customerPhoneNumber = registered.customerPhoneNumber;
+          bookingData.smsConsent = registered.smsConsent;
+        } else {
+          // Walk-in: register the vehicle only. Customer details (and loyalty)
+          // can be added later by editing the booking.
+          const registered = await ensureVehicleRegistration({
+            businessId: bookingBusinessId,
+            plate: String(bookingData.carRegistrationNumber),
+            ...(bookingData.vehicleType ? { vehicleType: String(bookingData.vehicleType) } : {})
+          });
+
+          bookingData.vehicle = registered.vehicleId;
+          bookingData.carRegistrationNumber = registered.plate;
+
+          // If the plate is already owned by a known customer, attribute it.
+          if (registered.customerId) {
+            bookingData.customer = registered.customerId;
+            bookingData.customerName = registered.customerName;
+            bookingData.customerPhoneNumber = registered.customerPhoneNumber;
+            if (typeof registered.smsConsent === 'boolean') {
+              bookingData.smsConsent = registered.smsConsent;
+            }
+          }
+        }
       }
     } else if (category === 'carpet') {
       bookingData.phoneNumber = normalizePhoneForStorage(phoneNumber);
@@ -543,6 +565,47 @@ const bookingController = {
       category ?? (originalBooking.category as 'vehicle' | 'carpet');
     const treatAsVehicleBooking = categoryAfterPatch === 'vehicle';
 
+    // Admin adds customer details to a walk-in vehicle booking after creation:
+    // resolve/create the customer, link them to the booking's vehicle, and
+    // attach the customer to the booking so loyalty can apply going forward.
+    let addedCustomerPatch: Record<string, unknown> = {};
+    if (
+      treatAsVehicleBooking &&
+      vehicleId === undefined &&
+      customerId === undefined &&
+      typeof customerPhoneNumber === 'string' &&
+      customerPhoneNumber.trim()
+    ) {
+      const linkBusinessId = req.user?.business
+        ? req.user.business.toString()
+        : originalBooking.business.toString();
+      try {
+        const linked = await linkCustomerToVehicle({
+          businessId: linkBusinessId,
+          vehicleId: originalBooking.vehicle ?? null,
+          phoneNumber: customerPhoneNumber,
+          ...(typeof customerName === 'string' && customerName.trim()
+            ? { customerName }
+            : {}),
+          ...(typeof smsConsent === 'boolean' ? { smsConsent } : {})
+        });
+
+        addedCustomerPatch = {
+          customer: linked.customerId,
+          customerName: linked.customerName,
+          customerPhoneNumber: linked.customerPhoneNumber,
+          ...(categoryAfterPatch !== 'carpet' ? { smsConsent: linked.smsConsent } : {})
+        };
+      } catch (linkError) {
+        return next(
+          new AppError(
+            linkError instanceof Error ? linkError.message : 'Failed to link customer to booking',
+            400
+          )
+        );
+      }
+    }
+
     // Determine final attendant for wallet calculations
     const finalAttendant = attendant || originalBooking.attendant;
     const originalAttendant = originalBooking.attendant;
@@ -657,7 +720,8 @@ const bookingController = {
               }
             : {}),
           ...(Object.keys(vehiclePatch).length > 0 ? vehiclePatch : {}),
-          ...(smsConsent !== undefined && categoryAfterPatch !== 'carpet' && { smsConsent })
+          ...(smsConsent !== undefined && categoryAfterPatch !== 'carpet' && { smsConsent }),
+          ...(Object.keys(addedCustomerPatch).length > 0 ? addedCustomerPatch : {})
         },
         {
           new: true,

@@ -11,7 +11,7 @@ const vehicleSchema = new mongoose.Schema(
     customer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Customer',
-      required: [true, 'Customer is required']
+      default: null
     },
     plate: {
       type: String,

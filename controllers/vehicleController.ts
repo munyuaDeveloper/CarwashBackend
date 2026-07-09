@@ -7,6 +7,7 @@ import Vehicle from '../models/vehicleModel';
 import Customer from '../models/customerModel';
 import { normalizePlate } from '../utils/contactNormalization';
 import { findCustomerByPhone, findVehicleByPlate, resolveOrCreateCustomer } from '../utils/contactLookup';
+import { linkCustomerToVehicle } from '../utils/customerVehicleService';
 
 const pickFirstQueryString = (value: unknown): string | undefined => {
   if (value === undefined || value === null) {
@@ -247,13 +248,38 @@ const vehicleController = {
       return next(new AppError('Vehicle not found', 404));
     }
 
-    const { plate, vehicleType, customerId } = req.body as {
+    const { plate, vehicleType, customerId, customer } = req.body as {
       plate?: string;
       vehicleType?: string;
       customerId?: string;
+      customer?: {
+        name?: string;
+        phoneNumber?: string;
+        smsConsent?: boolean;
+      };
     };
 
-    if (customerId !== undefined) {
+    if (customer !== undefined && customerId !== undefined) {
+      return next(new AppError('Provide either customerId or customer, not both', 400));
+    }
+
+    if (customer !== undefined) {
+      const name = typeof customer.name === 'string' ? customer.name.trim() : '';
+      const phoneNumber = typeof customer.phoneNumber === 'string' ? customer.phoneNumber.trim() : '';
+      if (!name || !phoneNumber) {
+        return next(new AppError('customer.name and customer.phoneNumber are required', 400));
+      }
+
+      const linked = await linkCustomerToVehicle({
+        businessId,
+        vehicleId: vehicle._id,
+        phoneNumber,
+        customerName: name,
+        ...(typeof customer.smsConsent === 'boolean' ? { smsConsent: customer.smsConsent } : {})
+      });
+
+      vehicle.set('customer', linked.customerId);
+    } else if (customerId !== undefined) {
       const trimmedCustomerId = typeof customerId === 'string' ? customerId.trim() : '';
       if (!trimmedCustomerId || !mongoose.Types.ObjectId.isValid(trimmedCustomerId)) {
         return next(new AppError('Valid customerId is required when updating customer', 400));
