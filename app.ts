@@ -21,6 +21,7 @@ import vehicleRouter from './routes/vehicleRoutes';
 import textSmsWebhookRouter from './routes/textSmsWebhookRoutes';
 import mpesaRouter from './routes/mpesaRoutes';
 import mpesaWebhookRouter from './routes/mpesaWebhookRoutes';
+import attendantPayRouter from './routes/attendantPayRoutes';
 
 // Extend Request interface to include custom properties
 declare global {
@@ -108,6 +109,7 @@ app.use('/api/v1/vehicles', vehicleRouter);
 app.use('/api/v1/webhooks/textsms', textSmsWebhookRouter);
 app.use('/api/v1/webhooks/mpesa', mpesaWebhookRouter);
 app.use('/api/v1/mpesa', mpesaRouter);
+app.use('/api/v1/attendant-pay', attendantPayRouter);
 
 app.all('*', (req: Request, _res: Response, next: NextFunction) => {
   next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));

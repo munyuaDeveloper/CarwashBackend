@@ -8,6 +8,7 @@ import catchAsync from '../utils/catchAsync';
 import AppError from '../utils/appError';
 import APIFeatures from '../utils/apiFeatures';
 import { userHasAnyRole, userHasRole } from '../utils/userRoles';
+import { markSalaryAccrualsPaid } from '../utils/attendantPay';
 
 const walletController = {
   // Get wallet for current attendant
@@ -281,6 +282,7 @@ const walletController = {
       },
       { attendantPaid: true }
     );
+    await markSalaryAccrualsPaid(attendantId);
 
     await wallet.resetWallet();
     // Balance is now 0 after reset. New bookings will be added incrementally.
@@ -694,6 +696,7 @@ const walletController = {
           },
           { attendantPaid: true }
         );
+        await markSalaryAccrualsPaid(attendantId);
 
         // Reset wallet
         await wallet.resetWallet();

@@ -1,5 +1,5 @@
 import Booking from '../models/bookingModel';
-import Wallet from '../models/walletModel';
+import { applyCompletedBookingToWallet, getSharesForAmount, paySnapshotFields } from './attendantPay';
 import { processCompletedBookingLoyalty } from './loyaltyService';
 
 export const completeBookingAfterMpesaPayment = async (bookingId: string): Promise<void> => {
@@ -8,11 +8,12 @@ export const completeBookingAfterMpesaPayment = async (bookingId: string): Promi
     return;
   }
 
-  const wallet = await Wallet.getOrCreateWallet(booking.attendant.toString());
-  await wallet['addCompletedBooking'](booking.amount, booking.paymentType);
-
+  const shares = await getSharesForAmount(booking.business.toString(), booking.amount);
+  booking.set(paySnapshotFields(shares));
   booking.status = 'completed';
   await booking.save();
+
+  await applyCompletedBookingToWallet(booking);
 
   if (!booking['loyaltyProcessed']) {
     try {

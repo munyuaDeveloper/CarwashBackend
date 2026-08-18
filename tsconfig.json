@@ -28,25 +28,7 @@
     "allowUnusedLabels": false,
     "allowUnreachableCode": false,
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-    "baseUrl": "./",
-    "paths": {
-      "@/*": [
-        "./*"
-      ],
-      "@/controllers/*": [
-        "./controllers/*"
-      ],
-      "@/models/*": [
-        "./models/*"
-      ],
-      "@/routes/*": [
-        "./routes/*"
-      ],
-      "@/utils/*": [
-        "./utils/*"
-      ]
-    }
+    "emitDecoratorMetadata": true
   },
   "include": [
     "**/*.ts",

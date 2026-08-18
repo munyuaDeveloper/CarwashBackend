@@ -122,6 +122,18 @@ const bookingSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  attendantShareKes: {
+    type: Number,
+    min: 0
+  },
+  companyShareKes: {
+    type: Number,
+    min: 0
+  },
+  attendantPayMode: {
+    type: String,
+    enum: ['percentage', 'daily_salary', 'monthly_salary']
+  },
   createdAt: {
     type: Date,
     default: Date.now

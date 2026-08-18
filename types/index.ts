@@ -18,6 +18,7 @@ export interface IUser extends Document {
   active: boolean;
   business?: string; // ObjectId reference to Business
   wallet?: string; // ObjectId reference to Wallet
+  salaryAmountKes?: number | null;
   correctPassword(candidatePassword: string, userPassword: string): Promise<boolean>;
   changedPasswordAfter(JWTTimestamp: number): boolean;
   createPasswordResetToken(): string;
@@ -100,6 +101,9 @@ export interface IBooking extends Document {
   loyaltyPointsRedeemed?: number;
   loyaltyDiscountKes?: number;
   loyaltyProcessed?: boolean;
+  attendantShareKes?: number | null;
+  companyShareKes?: number | null;
+  attendantPayMode?: 'percentage' | 'daily_salary' | 'monthly_salary' | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -128,8 +132,16 @@ export interface IWallet extends Document {
   createdAt: Date;
   updatedAt: Date;
   resetWallet(): Promise<IWallet>;
-  addCompletedBooking(amount: number, paymentType: string): Promise<IWallet>;
-  removeCompletedBooking(amount: number, paymentType: string): Promise<IWallet>;
+  addCompletedBooking(
+    amount: number,
+    paymentType: string,
+    shares?: { attendantShare: number; companyShare: number }
+  ): Promise<IWallet>;
+  removeCompletedBooking(
+    amount: number,
+    paymentType: string,
+    shares?: { attendantShare: number; companyShare: number }
+  ): Promise<IWallet>;
   updateCompletedBooking(oldAmount: number, oldPaymentType: string, newAmount: number, newPaymentType: string): Promise<IWallet>;
   rebuildWalletBalance(): Promise<IWallet>;
   calculateBalanceFromBookings(targetDate?: Date): Promise<{

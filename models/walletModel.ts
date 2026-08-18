@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { IWallet, IWalletModel } from '../types';
 import Booking from './bookingModel';
+import AttendantPayAccrual from './attendantPayAccrualModel';
+import { getPayPeriod, getSharesFromBooking } from '../utils/attendantPayMath';
 
 const walletSchema = new mongoose.Schema({
   attendant: {
@@ -96,11 +98,33 @@ walletSchema.pre('save', function (next) {
   next();
 });
 
+const fallbackShares = (amount: number) => ({
+  attendantShare: amount * 0.4,
+  companyShare: amount * 0.6
+});
+
+const resolveShares = (
+  amount: number,
+  shares?: { attendantShare: number; companyShare: number }
+) => {
+  if (
+    shares &&
+    Number.isFinite(shares.attendantShare) &&
+    Number.isFinite(shares.companyShare)
+  ) {
+    return shares;
+  }
+  return fallbackShares(amount);
+};
+
 // Instance method to add a completed booking to wallet balance (incremental)
 // This is called when a booking is marked as completed
-walletSchema.methods['addCompletedBooking'] = function (amount: number, paymentType: string) {
-  const commission = amount * 0.4; // 40% commission
-  const companyShare = amount * 0.6; // 60% company share
+walletSchema.methods['addCompletedBooking'] = function (
+  amount: number,
+  paymentType: string,
+  shares?: { attendantShare: number; companyShare: number }
+) {
+  const { attendantShare: commission, companyShare } = resolveShares(amount, shares);
 
   // Update totals
   this['totalEarnings'] = (this['totalEarnings'] || 0) + amount;
@@ -128,9 +152,12 @@ walletSchema.methods['addCompletedBooking'] = function (amount: number, paymentT
 
 // Instance method to remove/reverse a completed booking from wallet balance (incremental)
 // This is called when a booking is deleted or status changes from completed
-walletSchema.methods['removeCompletedBooking'] = function (amount: number, paymentType: string) {
-  const commission = amount * 0.4; // 40% commission
-  const companyShare = amount * 0.6; // 60% company share
+walletSchema.methods['removeCompletedBooking'] = function (
+  amount: number,
+  paymentType: string,
+  shares?: { attendantShare: number; companyShare: number }
+) {
+  const { attendantShare: commission, companyShare } = resolveShares(amount, shares);
 
   // Update totals (subtract)
   this['totalEarnings'] = Math.max(0, (this['totalEarnings'] || 0) - amount);
@@ -191,8 +218,7 @@ walletSchema.methods['rebuildWalletBalance'] = async function () {
 
   bookings.forEach((booking: any) => {
     const amount = booking.amount;
-    const commission = amount * 0.4; // 40% commission
-    const companyShare = amount * 0.6; // 60% company share
+    const { attendantShare: commission, companyShare } = getSharesFromBooking(booking);
 
     totalEarnings += amount;
     totalCommission += commission;
@@ -220,6 +246,15 @@ walletSchema.methods['rebuildWalletBalance'] = async function () {
       }
     });
   }
+
+  // Add unpaid salary accruals (daily/monthly pay is not part of wash commission)
+  const unpaidAccruals = await AttendantPayAccrual.find({
+    attendant: attendantId,
+    status: 'due'
+  });
+  unpaidAccruals.forEach((accrual) => {
+    balance += accrual['amountKes'] || 0;
+  });
 
   this['balance'] = balance;
   this['totalEarnings'] = totalEarnings;
@@ -265,8 +300,7 @@ walletSchema.methods['calculateBalanceFromBookings'] = async function (targetDat
 
   bookings.forEach((booking: any) => {
     const amount = booking.amount;
-    const commission = amount * 0.4; // 40% commission
-    const companyShare = amount * 0.6; // 60% company share
+    const { attendantShare: commission, companyShare } = getSharesFromBooking(booking);
 
     totalEarnings += amount;
     totalCommission += commission;
@@ -294,6 +328,29 @@ walletSchema.methods['calculateBalanceFromBookings'] = async function (targetDat
       }
     });
   }
+
+  // Unpaid salary for this date (daily) or month
+  const dayKey = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(dateToUse);
+  const monthKey = dayKey.slice(0, 7);
+  const dateAccruals = await AttendantPayAccrual.find({
+    attendant: attendantId,
+    status: 'due',
+    periodKey: { $in: [dayKey, monthKey] }
+  });
+  dateAccruals.forEach((accrual) => {
+    const period = getPayPeriod(
+      accrual['period'] === 'month' ? 'monthly_salary' : 'daily_salary',
+      dateToUse
+    );
+    if (period?.periodKey === accrual['periodKey']) {
+      balance += accrual['amountKes'] || 0;
+    }
+  });
 
   // For date-specific queries, we don't update the stored balance
   // We just return the calculated values for that date

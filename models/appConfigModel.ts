@@ -5,7 +5,7 @@ const appConfigSchema = new mongoose.Schema({
   // Core wallet reset fields
   autoResetEnabled: {
     type: Boolean,
-    default: true, // Default to enabled
+    default: false,
     required: true
   },
   lastResetDate: {
@@ -43,7 +43,7 @@ appConfigSchema.statics['getOrCreateConfig'] = async function (): Promise<IAppCo
   if (!config) {
     // Create default config if none exists
     config = await this.create({
-      autoResetEnabled: true,
+      autoResetEnabled: false,
       lastResetDate: null,
       lastResetBy: null
     });
@@ -61,7 +61,7 @@ appConfigSchema.statics['updateConfig'] = async function (
   if (!config) {
     // Create config with defaults
     const defaultConfig: any = {
-      autoResetEnabled: updates.autoResetEnabled ?? true,
+      autoResetEnabled: updates.autoResetEnabled ?? false,
       lastResetDate: updates.lastResetDate ?? null,
       lastResetBy: updates.lastResetBy ?? null,
       settings: updates.settings ?? {}

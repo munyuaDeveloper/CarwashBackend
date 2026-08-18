@@ -100,24 +100,36 @@ const resetWalletBalancesJob = async (): Promise<void> => {
  * Cron expression: '0 0 * * *' means: minute 0, hour 0, every day of month, every month, every day of week
  */
 export const startWalletResetCronJob = (): void => {
-  // Check if MongoDB is connected before starting cron job
-  if (mongoose.connection.readyState !== 1) {
-    console.warn('⚠️  MongoDB not connected. Cron job will start after database connection.');
+  // Auto wallet reset is disabled for now — do not schedule the midnight job.
+  // Persist the flag so Settings and the job body stay in sync if this is re-enabled later.
+  const disableAutoReset = async (): Promise<void> => {
+    try {
+      await AppConfig.updateConfig({
+        autoResetEnabled: false,
+        lastResetBy: 'system:auto-reset-disabled',
+      });
+      console.log('⏸️  Auto wallet reset is disabled. Midnight reset job will not run.');
+    } catch (error) {
+      console.error('Failed to persist auto wallet reset disable:', error);
+      console.log('⏸️  Auto wallet reset cron job was not scheduled.');
+    }
+  };
 
-    // Wait for MongoDB connection
+  if (mongoose.connection.readyState !== 1) {
     mongoose.connection.once('connected', () => {
-      console.log('✅ MongoDB connected. Starting wallet reset cron job...');
-      initializeCronJob();
+      void disableAutoReset();
     });
-  } else {
-    initializeCronJob();
+    return;
   }
+
+  void disableAutoReset();
 };
 
 /**
  * Initialize the cron job
  */
-const initializeCronJob = (): void => {
+/** Kept for when auto wallet reset is turned back on. */
+export const initializeCronJob = (): void => {
   // Schedule job to run every day at 12:00 AM (midnight)
   // Cron expression: '0 0 * * *' = minute 0, hour 0, every day
   const cronExpression = '0 0 * * *';

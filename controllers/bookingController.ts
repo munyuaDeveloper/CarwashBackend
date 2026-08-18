@@ -2,7 +2,6 @@ import { Response, NextFunction } from 'express';
 import { IRequestWithUser } from '../types';
 import Booking from '../models/bookingModel';
 import User from '../models/userModel';
-import Wallet from '../models/walletModel';
 import Customer from '../models/customerModel';
 import Vehicle from '../models/vehicleModel';
 import catchAsync from '../utils/catchAsync';
@@ -10,6 +9,12 @@ import AppError from '../utils/appError';
 import APIFeatures from '../utils/apiFeatures';
 import Business from '../models/businessModel';
 import { calculateDiscountFromPoints, processCompletedBookingLoyalty } from '../utils/loyaltyService';
+import {
+  applyCompletedBookingToWallet,
+  getSharesForAmount,
+  paySnapshotFields,
+  reverseCompletedBookingFromWallet
+} from '../utils/attendantPay';
 import {
   ensureCustomerRegistration,
   ensureVehicleCustomerRegistration,
@@ -333,9 +338,10 @@ const bookingController = {
     // Otherwise, wallet balance remains unchanged (starts at 0)
     if (newBooking.status === 'completed') {
       try {
-        const wallet = await Wallet.getOrCreateWallet(attendant);
-        wallet.isPaid = false;
-        await wallet['addCompletedBooking'](newBooking.amount, newBooking.paymentType);
+        const shares = await getSharesForAmount(bookingBusinessId, newBooking.amount);
+        newBooking.set(paySnapshotFields(shares));
+        await newBooking.save();
+        await applyCompletedBookingToWallet(newBooking);
         if (!newBooking['loyaltyProcessed']) {
           await processCompletedBookingLoyalty(newBooking._id.toString());
         }
@@ -621,47 +627,53 @@ const bookingController = {
     const finalAmount = amount !== undefined ? amount : originalBooking.amount;
     const finalPaymentType = paymentType !== undefined ? paymentType : originalBooking.paymentType;
 
+    const paySnapshotForUpdate: Record<string, unknown> = {};
+
     // Update wallet balances incrementally
     try {
-      // Case 1: Status changed from completed to something else - remove from wallet
-      if (statusChangedFromCompleted) {
-        const originalWallet = await Wallet.getOrCreateWallet(originalAttendant);
-        await originalWallet['removeCompletedBooking'](originalBooking.amount, originalBooking.paymentType);
-      }
+      const walletNeedsUpdate =
+        statusChangedFromCompleted ||
+        statusChangedToCompleted ||
+        (wasCompleted && (amountChanged || paymentTypeChanged || attendantChanged));
 
-      // Case 2: Status changed to completed - add to wallet
-      if (statusChangedToCompleted) {
-        const targetWallet = await Wallet.getOrCreateWallet(finalAttendant);
-        await targetWallet['addCompletedBooking'](finalAmount, finalPaymentType);
-      }
+      if (walletNeedsUpdate) {
+        const nextShares = await getSharesForAmount(originalBooking.business.toString(), finalAmount);
+        const nextSnapshot = paySnapshotFields(nextShares);
 
-      // Case 3: Booking was completed and amount/paymentType changed - update incrementally
-      if (wasCompleted && !statusChanged && (amountChanged || paymentTypeChanged)) {
-        const originalWallet = await Wallet.getOrCreateWallet(originalAttendant);
-        // Remove old booking contribution
-        await originalWallet['removeCompletedBooking'](originalBooking.amount, originalBooking.paymentType);
-        // Add new booking contribution
-        await originalWallet['addCompletedBooking'](finalAmount, finalPaymentType);
-      }
+        const asWalletBooking = (extra?: {
+          attendant?: typeof finalAttendant;
+          amount?: number;
+          paymentType?: typeof finalPaymentType;
+          attendantShareKes?: number;
+          companyShareKes?: number;
+          attendantPayMode?: typeof nextSnapshot.attendantPayMode;
+        }) => ({
+          _id: originalBooking._id,
+          attendant: extra?.attendant ?? originalBooking.attendant,
+          business: originalBooking.business,
+          amount: extra?.amount ?? originalBooking.amount,
+          paymentType: extra?.paymentType ?? originalBooking.paymentType,
+          createdAt: originalBooking.createdAt,
+          attendantShareKes: extra?.attendantShareKes ?? originalBooking['attendantShareKes'] ?? null,
+          companyShareKes: extra?.companyShareKes ?? originalBooking['companyShareKes'] ?? null,
+          attendantPayMode: extra?.attendantPayMode ?? originalBooking['attendantPayMode'] ?? null
+        });
 
-      // Case 4: Booking was completed and attendant changed - move between wallets
-      if (wasCompleted && attendantChanged) {
-        // Remove from original attendant's wallet
-        const originalWallet = await Wallet.getOrCreateWallet(originalAttendant);
-        await originalWallet['removeCompletedBooking'](finalAmount, finalPaymentType);
-        // Add to new attendant's wallet
-        const newWallet = await Wallet.getOrCreateWallet(finalAttendant);
-        await newWallet['addCompletedBooking'](finalAmount, finalPaymentType);
-      }
+        if (wasCompleted || statusChangedFromCompleted) {
+          await reverseCompletedBookingFromWallet(asWalletBooking());
+        }
 
-      // Case 5: Booking was completed, attendant changed, AND amount/paymentType changed
-      if (wasCompleted && attendantChanged && (amountChanged || paymentTypeChanged)) {
-        // Remove old booking from original attendant
-        const originalWallet = await Wallet.getOrCreateWallet(originalAttendant);
-        await originalWallet['removeCompletedBooking'](originalBooking.amount, originalBooking.paymentType);
-        // Add new booking to new attendant
-        const newWallet = await Wallet.getOrCreateWallet(finalAttendant);
-        await newWallet['addCompletedBooking'](finalAmount, finalPaymentType);
+        if (!statusChangedFromCompleted) {
+          await applyCompletedBookingToWallet(
+            asWalletBooking({
+              attendant: finalAttendant,
+              amount: finalAmount,
+              paymentType: finalPaymentType,
+              ...nextSnapshot
+            })
+          );
+          Object.assign(paySnapshotForUpdate, nextSnapshot);
+        }
       }
     } catch (error) {
       console.error('Error updating wallet balances:', error);
@@ -721,7 +733,8 @@ const bookingController = {
             : {}),
           ...(Object.keys(vehiclePatch).length > 0 ? vehiclePatch : {}),
           ...(smsConsent !== undefined && categoryAfterPatch !== 'carpet' && { smsConsent }),
-          ...(Object.keys(addedCustomerPatch).length > 0 ? addedCustomerPatch : {})
+          ...(Object.keys(addedCustomerPatch).length > 0 ? addedCustomerPatch : {}),
+          ...(Object.keys(paySnapshotForUpdate).length > 0 ? paySnapshotForUpdate : {})
         },
         {
           new: true,
@@ -770,8 +783,7 @@ const bookingController = {
     // Remove booking from wallet balance if it was completed
     if (booking.status === 'completed') {
       try {
-        const wallet = await Wallet.getOrCreateWallet(booking.attendant);
-        await wallet['removeCompletedBooking'](booking.amount, booking.paymentType);
+        await reverseCompletedBookingFromWallet(booking);
       } catch (error) {
         console.error('Error updating wallet balance for deleted booking:', error);
         // Don't fail the deletion if wallet update fails, but log the error

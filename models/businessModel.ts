@@ -83,6 +83,24 @@ const businessSchema = new mongoose.Schema(
         default: false
       }
     },
+    attendantPaySettings: {
+      mode: {
+        type: String,
+        enum: ['percentage', 'daily_salary', 'monthly_salary'],
+        default: 'percentage'
+      },
+      attendantPercent: {
+        type: Number,
+        default: 40,
+        min: 0,
+        max: 100
+      },
+      salaryAmountKes: {
+        type: Number,
+        default: 0,
+        min: 0
+      }
+    },
     mpesaSettings: {
       enabled: {
         type: Boolean,
