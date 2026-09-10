@@ -187,9 +187,9 @@ const payerOwnsVehicle = async (booking: BookingForLoyalty, payerCustomerId?: st
 
 const buildDefaultTemplate = (type: TemplateType): string => {
   if (type === 'reward_achievement') {
-    return 'Congratulations {{customer_name}}! Your {{points_balance}} points at {{business_name}} can cover your next wash. See you soon!';
+    return 'Hi {{customer_name}}! Your balance at {{business_name}} is now {{points_balance}} points. Redeem them on your next visit. Thank you!';
   }
-  return 'Hi {{customer_name}}! You earned {{points_earned}} points at {{business_name}} ({{points_balance}} total). {{points_to_redeem}} more for KSh {{service_amount_kes}} off!';
+  return 'Hi {{customer_name}}! You earned {{points_earned}} points at {{business_name}}. Your balance is now {{points_balance}} points. Redeem them on your next visit. Thank you!';
 };
 
 const resolveTemplate = async (businessId: string, type: TemplateType): Promise<string> => {
@@ -371,10 +371,10 @@ export const processCompletedBookingLoyalty = async (bookingId: string): Promise
   const discountKes =
     pointsToRedeem > 0
       ? calculateDiscountFromPoints(
-          pointsToRedeem,
-          settings.redemptionPoints,
-          settings.redemptionValueKes
-        )
+        pointsToRedeem,
+        settings.redemptionPoints,
+        settings.redemptionValueKes
+      )
       : 0;
   const serviceValueKes = booking.amount + discountKes;
 
