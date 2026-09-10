@@ -17,7 +17,7 @@ import {
 import { normalizePhoneForStorage } from '../utils/contactNormalization';
 import { userHasAnyRole, userHasRole } from '../utils/userRoles';
 
-const TEMPLATE_TYPES = ['loyalty_progress', 'reward_achievement'];
+const TEMPLATE_TYPES = ['loyalty_progress', 'points_redemption'];
 const TEMPLATE_STATUSES = ['draft', 'pending_review', 'approved', 'rejected', 'disabled'];
 
 const getBusinessContext = (req: IRequestWithUser): string | null =>

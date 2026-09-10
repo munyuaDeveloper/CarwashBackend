@@ -17,7 +17,7 @@ const smsLogSchema = new mongoose.Schema(
     },
     templateType: {
       type: String,
-      enum: ['loyalty_progress', 'reward_achievement'],
+      enum: ['loyalty_progress', 'points_redemption', 'reward_achievement'],
       required: [true, 'Template type is required']
     },
     recipientPhone: {

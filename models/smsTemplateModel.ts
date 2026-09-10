@@ -32,7 +32,7 @@ const smsTemplateSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['loyalty_progress', 'reward_achievement'],
+      enum: ['loyalty_progress', 'points_redemption'],
       required: [true, 'Template type is required']
     },
     content: {

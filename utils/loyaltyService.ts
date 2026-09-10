@@ -9,7 +9,7 @@ import SmsTemplate from '../models/smsTemplateModel';
 import SmsLog from '../models/smsLogModel';
 import { normalizeKenyanMobile, sendViaTextSms } from './textSmsService';
 
-type TemplateType = 'loyalty_progress' | 'reward_achievement';
+type TemplateType = 'loyalty_progress' | 'points_redemption';
 
 type LoyaltySettings = {
   enabled?: boolean;
@@ -44,6 +44,13 @@ type BookingForLoyalty = {
 
 export const getTodayKey = (): string => new Date().toISOString().slice(0, 10);
 export const getMonthKey = (): string => new Date().toISOString().slice(0, 7);
+
+/** First token of a full name for SMS greetings (e.g. "Peter Kamau" → "Peter"). */
+export const toFirstName = (fullName: string): string => {
+  const trimmed = fullName.trim();
+  if (!trimmed) return '';
+  return trimmed.split(/\s+/)[0] ?? trimmed;
+};
 
 export const calculatePointsFromAmount = (amount: number, pointsPerHundredKes: number): number => {
   if (amount <= 0 || pointsPerHundredKes <= 0) return 0;
@@ -186,8 +193,8 @@ const payerOwnsVehicle = async (booking: BookingForLoyalty, payerCustomerId?: st
 };
 
 const buildDefaultTemplate = (type: TemplateType): string => {
-  if (type === 'reward_achievement') {
-    return 'Hi {{customer_name}}! Your balance at {{business_name}} is now {{points_balance}} points. Redeem them on your next visit. Thank you!';
+  if (type === 'points_redemption') {
+    return 'Hi {{customer_name}}! You redeemed {{points_redeemed}} points at {{business_name}} for KSh {{loyalty_discount_kes}} off. Your balance is now {{points_balance}} points. Thank you!';
   }
   return 'Hi {{customer_name}}! You earned {{points_earned}} points at {{business_name}}. Your balance is now {{points_balance}} points. Redeem them on your next visit. Thank you!';
 };
@@ -208,11 +215,13 @@ const fillTemplate = (
     vehiclePlate: string;
     businessName: string;
     pointsEarned: number;
+    pointsRedeemed: number;
     pointsBalance: number;
     pointsToRedeem: number;
     pointsNeededForWash: number;
     serviceAmountKes: number;
     redemptionValueKes: number;
+    loyaltyDiscountKes: number;
   }
 ): string => {
   const replacements: Array<[string, string]> = [
@@ -224,6 +233,8 @@ const fillTemplate = (
     ['{business_name}', params.businessName],
     ['{{points_earned}}', String(params.pointsEarned)],
     ['{points_earned}', String(params.pointsEarned)],
+    ['{{points_redeemed}}', String(params.pointsRedeemed)],
+    ['{points_redeemed}', String(params.pointsRedeemed)],
     ['{{points_balance}}', String(params.pointsBalance)],
     ['{points_balance}', String(params.pointsBalance)],
     ['{{points_to_redeem}}', String(params.pointsToRedeem)],
@@ -232,6 +243,8 @@ const fillTemplate = (
     ['{points_needed_for_wash}', String(params.pointsNeededForWash)],
     ['{{service_amount_kes}}', String(params.serviceAmountKes)],
     ['{service_amount_kes}', String(params.serviceAmountKes)],
+    ['{{loyalty_discount_kes}}', String(params.loyaltyDiscountKes)],
+    ['{loyalty_discount_kes}', String(params.loyaltyDiscountKes)],
     ['{{redemption_value_kes}}', String(params.redemptionValueKes)],
     ['{redemption_value_kes}', String(params.redemptionValueKes)],
     // Legacy wash-count placeholders (points migration)
@@ -563,10 +576,6 @@ export const processCompletedBookingLoyalty = async (bookingId: string): Promise
     settings.redemptionPoints,
     settings.redemptionValueKes
   );
-  const crossedRedemptionThreshold =
-    pointsEarned > 0 &&
-    pointsNeededForService > 0 &&
-    balanceAfter >= pointsNeededForService;
   const pointsToNextRedeem = Math.max(0, pointsNeededForService - balanceAfter);
 
   await Booking.findByIdAndUpdate(bookingId, {
@@ -576,9 +585,8 @@ export const processCompletedBookingLoyalty = async (bookingId: string): Promise
     loyaltyDiscountKes: discountApplied
   });
 
-  const messageType: TemplateType = crossedRedemptionThreshold
-    ? 'reward_achievement'
-    : 'loyalty_progress';
+  const messageType: TemplateType =
+    pointsRedeemedApplied > 0 ? 'points_redemption' : 'loyalty_progress';
 
   const resolveSkipReason = (): string | null => {
     if (!loyaltySettings?.smsEnabled) return 'SMS notifications are disabled in loyalty settings';
@@ -613,18 +621,20 @@ export const processCompletedBookingLoyalty = async (bookingId: string): Promise
 
   const recipientPhone = normalizeKenyanMobile(customerPhone) || customerPhone;
   const template = await resolveTemplate(business._id.toString(), messageType);
-  const displayCustomerName = customerName || 'Customer';
+  const displayCustomerName = toFirstName(customerName || 'Customer') || 'Customer';
   const vehiclePlate = vehicleIdentifier || 'vehicle';
   const message = fillTemplate(template, {
     customerName: displayCustomerName,
     vehiclePlate,
     businessName: business['name'],
     pointsEarned,
+    pointsRedeemed: pointsRedeemedApplied,
     pointsBalance: balanceAfter,
     pointsToRedeem: pointsToNextRedeem,
     pointsNeededForWash: pointsNeededForService,
     serviceAmountKes: servicePriceForSms,
-    redemptionValueKes: settings.redemptionValueKes
+    redemptionValueKes: settings.redemptionValueKes,
+    loyaltyDiscountKes: discountApplied
   });
 
   const smsLog = await SmsLog.create({
